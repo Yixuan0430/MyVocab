@@ -8,7 +8,7 @@ struct PracticeView: View {
     @Binding var route: Route?
 
     @AppStorage("lang") private var lang = AppLanguage.zh
-    @AppStorage("accent") private var accent = Accent.sage
+    @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("level") private var level = Level.units
     @AppStorage("showDetails") private var showDetails = false
     @State private var card = Card(front: "", back: "")
@@ -43,6 +43,36 @@ struct PracticeView: View {
     @State private var settingUpFree = false
     @State private var freeTotal = 0
 
+    /// A frozen state for offscreen snapshots; nil in the app.
+    struct Preset { var index: Int; var revealed = false, learning = false, details = false, finished = false, free = false }
+    private var preset: Preset?
+
+    init(source: Source, route: Binding<Route?>, preset: Preset? = nil) {
+        self.source = source; _route = route; self.preset = preset
+        guard let p = preset else { return }
+        var c: Card?
+        switch source {
+        case .numbers:
+            let e = FrenchNumbers.entry(p.index); c = Card(front: "\(p.index)", back: e.word, hint: "/\(e.ipa)/")
+        case .study(let d):
+            if d.cards.indices.contains(p.index) { c = d.cards[p.index] }
+            _current = State(initialValue: p.index); _queue = State(initialValue: Array(d.cards.indices.prefix(9)))
+        case .free(let d):
+            if d.cards.indices.contains(p.index) { c = d.cards[p.index] }
+            _freeTotal = State(initialValue: 20); _order = State(initialValue: Array(d.cards.indices.prefix(12)))
+        }
+        if let c {
+            _card = State(initialValue: c); _parts = State(initialValue: CardParts(c))
+            _section = State(initialValue: CardParts(c).sections.first?.id ?? "")
+        }
+        _revealed = State(initialValue: p.revealed); _learning = State(initialValue: p.learning)
+        _showDetails = AppStorage(wrappedValue: p.details, "snapshot.details.\(p.details)")
+        _finished = State(initialValue: p.finished); _settingUpFree = State(initialValue: p.free)
+        _seen = State(initialValue: 7); _groupIndex = State(initialValue: 2)
+        _tally = State(initialValue: [.forgot: 2, .vague: 3, .remembered: 5]); _newLearned = State(initialValue: 4)
+        _reviewedCount = State(initialValue: 6)
+    }
+
     private var l: L { L(lang: lang) }
     private var isNumbers: Bool { if case .numbers = source { true } else { false } }
     private var isStudy: Bool { if case .study = source { true } else { false } }
@@ -56,21 +86,25 @@ struct PracticeView: View {
         VStack(spacing: 0) {
             header
             Spacer(minLength: 16)
-            if settingUpFree, let d = deck {
-                freeSetupView(d)
-            } else if finished {
-                doneView
-            } else {
-                #if os(iOS)
-                touchCard
-                #else
-                cardView
-                #endif
+            VStack(spacing: 28) {
+                if settingUpFree, let d = deck {
+                    freeSetupView(d)
+                } else if finished {
+                    doneView
+                } else {
+                    #if os(iOS)
+                    touchCard
+                    #else
+                    cardView
+                    #endif
+                }
+                // The action bar sits right under the card instead of at the window's bottom edge.
+                if isStudy && revealed && !finished && !settingUpFree {
+                    Group { if learning { learnBar } else { gradeBar } }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
             }
             Spacer(minLength: 16)
-            if isStudy && revealed && !finished && !settingUpFree {
-                Group { if learning { learnBar } else { gradeBar } }.padding(.bottom, bottomGap)
-            }
             #if os(macOS)
             footer
             #endif
@@ -78,6 +112,7 @@ struct PracticeView: View {
         .padding(.horizontal, size.gutter).padding(.top, size.top).padding(.bottom, pageBottom)
         .focusable().focused($focused).focusEffectDisabled()
         .onAppear {
+            if preset != nil { return }
             focused = true
             switch source {
             case .study:
@@ -100,6 +135,11 @@ struct PracticeView: View {
         .onKeyPress("s") { speak(); return .handled }
         .onKeyPress("d") { toggleDetails(); return .handled }
         .sensoryFeedback(.impact(weight: .light), trigger: gradeTick)
+        .overlay(alignment: .bottom) {
+            if let error = speaker.lastError {
+                Text("朗读失败：" + error).font(.callout).foregroundStyle(Color.ink).padding().paperCard(radius: 12).padding(.bottom, 60)
+            }
+        }
     }
 
     /// Touch controls: tap the card to reveal or continue; once revealed, swipe right for
@@ -124,16 +164,20 @@ struct PracticeView: View {
             Button(action: goBack) {
                 Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading)
             }
-            .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted)
+            .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted).accessibilityLabel(l["back"])
             Spacer()
             if isNumbers {
-                Picker("", selection: $level) { ForEach(Level.allCases) { Text($0.label).tag($0) } }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize()
-                    .onChange(of: level) { next() }
+                HStack(spacing: 4) {
+                    ForEach(Level.allCases) { lv in
+                        Chip(title: lv.label, selected: level == lv, accent: accent) { level = lv }
+                    }
+                }
+                .padding(3).background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.lineSoft))
+                .onChange(of: level) { next() }
             } else if let d = deck {
                 // On a phone the deck name gives way to the group counters.
                 if !(size.narrow && isStudy && !finished) {
-                    Text(d.name.replacingOccurrences(of: "_", with: " "))
+                    Text(d.displayName)
                         .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.muted).lineLimit(1)
                 }
                 if isStudy && !finished {
@@ -141,10 +185,10 @@ struct PracticeView: View {
                     HStack(spacing: 10) {
                         Text("\(size.narrow ? "" : "· ")\(l["group.label"]) #\(groupIndex)")
                             .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted).fixedSize()
-                        HStack(spacing: 8) {
-                            badgeCount(counts.review, color: gradeColor(.remembered), help: l["review"])
-                            badgeCount(counts.learning, color: gradeColor(.forgot), help: l["stat.learning"])
-                            badgeCount(counts.new, color: accent.color, help: l["new"])
+                        HStack(spacing: 6) {
+                            badgeCount(counts.review, color: Color.pos, label: l["badge.review"])
+                            badgeCount(counts.learning, color: Color.warn, label: l["badge.learning"])
+                            badgeCount(counts.new, color: accent.fill, label: l["badge.new"])
                         }
                         Text("(\(l["remaining"]) \(queue.count + (current == nil ? 0 : 1)))")
                             .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit().fixedSize()
@@ -157,13 +201,18 @@ struct PracticeView: View {
         }
     }
 
-    private func badgeCount(_ n: Int, color: Color, help: String) -> some View {
+    /// "复习 9" with a colour dot: the label says what the number counts, the dot only echoes the grade colours.
+    private func badgeCount(_ n: Int, color: Color, label: String) -> some View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text("\(n)").font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(Color.ink)
+            Text(label).font(.system(size: 12)).foregroundStyle(Color.muted)
+            Text("\(n)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Color.ink)
         }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.lineSoft))
+        .opacity(n == 0 ? 0.55 : 1)
         .fixedSize()
-        .help(help)
+        .accessibilityElement(children: .combine)
     }
 
     private func groupCounts(_ d: Deck) -> (review: Int, learning: Int, new: Int) {
@@ -186,6 +235,7 @@ struct PracticeView: View {
             Image(systemName: "shuffle.circle")
                 .font(.system(size: 42, weight: .light))
                 .foregroundStyle(accent.color)
+                .accessibilityHidden(true)
             VStack(spacing: 6) {
                 Text(l["free.setup.title"])
                     .font(.system(size: 28, weight: .medium, design: .serif))
@@ -220,40 +270,26 @@ struct PracticeView: View {
                         .foregroundStyle(Color.ink)
                         .frame(minWidth: 52)
                         .padding(.vertical, 5).padding(.horizontal, 10)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.line))
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.well))
                     stepButton("+") { freeCount = min(max(1, freeCount + 1), total) }
                     stepButton("+10") { freeCount = min(max(1, freeCount + 10), total) }
                 }
             }
             .padding(20)
             .frame(maxWidth: 440)
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color.panel))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.line))
+            .paperCard(radius: 18)
 
             Button { startFreePractice(d) } label: {
                 Label("\(l["free.start"])（\(min(max(1, freeCount), total)) \(l["group.words"])）", systemImage: "play.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, 26).padding(.vertical, 11)
-                    .background(Capsule().fill(accent.color))
-                    .foregroundStyle(Color.bg)
             }
-            .buttonStyle(.plain).focusable(false)
+            .buttonStyle(.capsule(.primary, accent, large: true))
+            .focusable(false)
         }
         .frame(maxWidth: .infinity)
     }
 
     private func presetPill(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .monospacedDigit()
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Capsule().fill(selected ? accent.color : Color.bg))
-                .foregroundStyle(selected ? Color.bg : Color.ink)
-                .overlay(Capsule().strokeBorder(selected ? accent.color : Color.line))
-        }
-        .buttonStyle(.plain).focusable(false)
+        Chip(title: title, selected: selected, accent: accent, action: action).focusable(false)
     }
 
     private func stepButton(_ label: String, action: @escaping () -> Void) -> some View {
@@ -263,9 +299,8 @@ struct PracticeView: View {
                 .monospacedDigit()
                 .frame(minWidth: 32)
                 .padding(.vertical, 6).padding(.horizontal, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.well))
                 .foregroundStyle(Color.ink)
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.line))
         }
         .buttonStyle(.plain).focusable(false)
     }
@@ -291,8 +326,8 @@ struct PracticeView: View {
                     Text(l["relearn.badge"])
                         .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 9).padding(.vertical, 3)
-                        .background(Capsule().fill(gradeColor(.forgot).opacity(0.15)))
-                        .foregroundStyle(gradeColor(.forgot))
+                        .background(Capsule().fill(Color.neg.opacity(0.14)))
+                        .foregroundStyle(Color.neg)
                 }
                 Text(parts.front)
                     .font(frontFont)
@@ -350,21 +385,15 @@ struct PracticeView: View {
     }
 
     private func pill(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Capsule().fill(accent.soft))
-                .foregroundStyle(accent.color)
-        }
-        .buttonStyle(.plain).focusable(false)
+        Button(action: action) { Label(title, systemImage: icon) }
+            .buttonStyle(.capsule(.soft, accent)).focusable(false)
     }
 
     // MARK: Notes panel
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal) {
+            SnapshotSafeScroll(axis: .horizontal) {
                 HStack(spacing: 4) {
                     ForEach(parts.sections) { s in
                         let on = s.id == (currentSection?.id ?? "")
@@ -380,9 +409,8 @@ struct PracticeView: View {
                 }
                 .padding(10)
             }
-            .scrollIndicators(.never)
-            Rectangle().fill(Color.line).frame(height: 1)
-            ScrollView {
+            Rectangle().fill(Color.lineSoft).frame(height: 1)
+            SnapshotSafeScroll(axis: .vertical) {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array((currentSection?.items ?? []).enumerated()), id: \.offset) { _, item in noteLine(item) }
                 }
@@ -392,8 +420,7 @@ struct PracticeView: View {
             .frame(maxHeight: max(140, size.height * 0.36))
         }
         .frame(maxWidth: 640 * k)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.panel))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.line))
+        .paperCard(radius: 14)
         .padding(.top, 6)
         .onTapGesture {} // keep clicks inside the panel from advancing the card
     }
@@ -407,7 +434,7 @@ struct PracticeView: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             if let fr = item.fr {
                 let speak = Button { speaker.say(fr, language: "fr-FR") } label: { Image(systemName: "speaker.wave.1").font(.system(size: 11)) }
-                    .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted.opacity(0.7))
+                    .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted).accessibilityLabel(l["listen"])
                 #if os(macOS)
                 speak.simultaneousGesture(TapGesture().modifiers(.option).onEnded { speaker.say(fr, language: "fr-FR", slow: true) })
                 #else
@@ -443,7 +470,7 @@ struct PracticeView: View {
         }
         .font(.system(size: 11)).foregroundStyle(Color.muted)
         .padding(.top, 14)
-        .overlay(alignment: .top) { Rectangle().fill(Color.line).frame(height: 1) }
+        .overlay(alignment: .top) { Rectangle().fill(Color.lineSoft).frame(height: 1) }
     }
 
     private func toggleDetails() {
@@ -491,13 +518,13 @@ struct PracticeView: View {
 
     private func grade(_ g: Grade) {
         guard isStudy, revealed, !learning, !settingUpFree, !finished, let d = deck, let i = current else { return }
+        guard progress.grade(d, card: i, g) else { return }
         // Record first-attempt rating in the group summary tally.
         if !gradedOnce.contains(i) {
             gradedOnce.insert(i)
             tally[g, default: 0] += 1
         }
         // Always update CardState so Anki learning/relearning steps graduate properly when recalled.
-        progress.grade(d, card: i, g)
         gradeTick += 1
         if g == .forgot {
             queue.insert(i, at: min(4, queue.count))
@@ -508,7 +535,7 @@ struct PracticeView: View {
     /// New word seen once: enter Anki Learning Step 1 (1 min) and bring it back in a few cards for its first test.
     private func continueLearning() {
         guard let d = deck, let i = current else { return }
-        progress.introduce(d, card: i)
+        guard progress.introduce(d, card: i) else { return }
         newLearned += 1
         queue.insert(i, at: min(5, queue.count))
         next()
@@ -518,26 +545,21 @@ struct PracticeView: View {
         HStack(spacing: 14) {
             Label(l["learn.badge"], systemImage: "sparkles").font(.system(size: 13, weight: .medium)).foregroundStyle(accent.color)
             Spacer()
-            Button(action: continueLearning) {
-                Text(l["learn.continue"]).font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, 22).padding(.vertical, 10)
-                    .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
-            }
-            .buttonStyle(.plain).focusable(false)
+            Button(action: continueLearning) { Text(l["learn.continue"]) }
+                .buttonStyle(.capsule(.primary, accent, large: true)).focusable(false)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.leading, 18).padding(.trailing, 8).padding(.vertical, 8)
         .frame(maxWidth: 560)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.line))
+        .paperCard(radius: 16)
     }
 
     // MARK: Grading
 
     /// Space under the action bar and the page; on iPhone the home indicator's safe area already separates them from the edge.
     #if os(iOS)
-    private let bottomGap: CGFloat = 4, pageBottom: CGFloat = 4
+    private let pageBottom: CGFloat = 4
     #else
-    private let bottomGap: CGFloat = 14, pageBottom: CGFloat = 24
+    private let pageBottom: CGFloat = 24
     #endif
 
     private var gradeBar: some View {
@@ -559,11 +581,14 @@ struct PracticeView: View {
                         Text(preview(g)).font(.system(size: sub)).foregroundStyle(Color.muted)
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, pad)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.line))
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.panel))
+                    .overlay(alignment: .top) { Capsule().fill(gradeColor(g)).frame(height: 3).padding(.horizontal, 28) }
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.lineSoft))
+                    .shadow(color: Color.shade.opacity(0.05), radius: 8, y: 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).focusable(false)
+                .accessibilityLabel("\(l["grade.\(g)"])，\(preview(g))")
             }
         }
         .frame(maxWidth: 560)
@@ -603,11 +628,8 @@ struct PracticeView: View {
                         focused = true
                     } label: {
                         Label(l["free.again"], systemImage: "shuffle")
-                            .font(.system(size: 13, weight: .semibold))
-                            .padding(.horizontal, 20).padding(.vertical, 10)
-                            .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
                     }
-                    .buttonStyle(.plain).focusable(false)
+                    .buttonStyle(.capsule(.primary, accent)).focusable(false)
 
                     pill(l["back.overview"], "chart.xyaxis.line") { goBack() }
                 }
@@ -652,11 +674,8 @@ struct PracticeView: View {
                                 ? "\(l["group.next"])（\(l["review"]) \(np.groupDue.count)\(np.groupNew.count > 0 ? " · \(l["new"]) \(np.groupNew.count)" : "")）"
                                 : "\(l["group.next.new"])（\(np.groupNew.count) \(l["group.words"])）"
                             Label(labelText, systemImage: "play.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .padding(.horizontal, 24).padding(.vertical, 10)
-                                .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
                         }
-                        .buttonStyle(.plain).focusable(false)
+                        .buttonStyle(.capsule(.primary, accent, large: true)).focusable(false)
                     }
                     .padding(.top, 4)
                 }
@@ -726,8 +745,8 @@ struct PracticeView: View {
 
 func gradeColor(_ g: Grade) -> Color {
     switch g {
-    case .forgot: Color.dyn(0xC25B52, 0xE08A82)
-    case .vague: Color.dyn(0xB08A23, 0xD9B75A)
-    case .remembered: Color.dyn(0x4F8A6E, 0x8CC4A4)
+    case .forgot: Color.neg
+    case .vague: Color.warn
+    case .remembered: Color.pos
     }
 }

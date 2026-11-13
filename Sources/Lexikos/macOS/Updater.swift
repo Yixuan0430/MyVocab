@@ -4,7 +4,7 @@ import Security
 /// Self-update from GitHub Releases: finds a newer release's .dmg, checks that the app inside is
 /// signed by the same Developer ID team, then swaps it in place and relaunches.
 @MainActor @Observable final class Updater {
-    static let repo = "Yixuan0430/Lexikos"
+    static let repo = "Yixuan0430/MyVocab"
     static let teamID = "BGM8P5U985"
 
     struct Release { var version: String; var notes: String; var dmg: URL; var page: URL }
@@ -16,13 +16,14 @@ import Security
     let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 
     private var lastCheck: Date? {
-        get { UserDefaults.standard.object(forKey: "updateLastCheck") as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: "updateLastCheck") }
+        get { Runtime.current.defaults.object(forKey: "updateLastCheck") as? Date }
+        set { Runtime.current.defaults.set(newValue, forKey: "updateLastCheck") }
     }
 
     /// Background check at launch, at most every 12 hours.
     func checkIfDue() async {
-        guard UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true else { return }
+        guard Runtime.current.syncEnabled else { return }
+        guard Runtime.current.defaults.object(forKey: "autoUpdate") as? Bool ?? true else { return }
         if let last = lastCheck, Date.now.timeIntervalSince(last) < 12 * 3600 { return }
         await check()
     }
@@ -32,7 +33,8 @@ import Security
         do {
             var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")!)
             req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await URLSession.shared.data(for: req)
+            try Self.validateHTTP(response)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tag = json["tag_name"] as? String,
                   let page = (json["html_url"] as? String).flatMap(URL.init(string:)),
@@ -65,7 +67,16 @@ import Security
 
     // MARK: Install
 
-    enum UpdateError: Error { case noRelease, notWritable, badSignature, mount }
+    enum UpdateError: Error { case noRelease, notWritable, badSignature, mount, http, version }
+
+    static func validateHTTP(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              response.url?.scheme == "https" else { throw UpdateError.http }
+    }
+
+    static func validIdentity(bundleID: String?, version: String?, expected: String, current: String) -> Bool {
+        bundleID == "com.yixuanwu.lexikos" && version == expected && isNewer(expected, than: current)
+    }
 
     func install() async {
         guard let release = available else { return }
@@ -85,22 +96,30 @@ import Security
             try await download(release.dmg, to: dmg)
 
             state = .installing
-            let mount = work.appendingPathComponent("mnt"), staged = work.appendingPathComponent("Lexikos.app")
-            guard run("/usr/bin/hdiutil", ["attach", dmg.path, "-nobrowse", "-readonly", "-mountpoint", mount.path]) else { throw UpdateError.mount }
-            let copied = run("/usr/bin/ditto", [mount.appendingPathComponent("Lexikos.app").path, staged.path])
-            _ = run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
+            let mount = work.appendingPathComponent("mnt")
+            let staged = parent.appendingPathComponent(".myvocab-update-" + UUID().uuidString + ".app")
+            let destination = parent.appendingPathComponent("MyVocab.app")
+            guard target == destination || !FileManager.default.fileExists(atPath: destination.path) else { throw UpdateError.notWritable }
+            guard await Self.run("/usr/bin/hdiutil", ["attach", dmg.path, "-nobrowse", "-readonly", "-mountpoint", mount.path]) else { throw UpdateError.mount }
+            let source = ["MyVocab.app", "Lexikos.app"].map { mount.appendingPathComponent($0) }
+                .first { FileManager.default.fileExists(atPath: $0.path) }
+            let copied: Bool
+            if let source { copied = await Self.run("/usr/bin/ditto", [source.path, staged.path]) } else { copied = false }
+            _ = await Self.run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
             guard copied else { throw UpdateError.mount }
-            guard Self.signedByUs(staged) else { throw UpdateError.badSignature }
+            guard Self.signedByUs(staged), let bundle = Bundle(url: staged),
+                  Self.validIdentity(bundleID: bundle.bundleIdentifier,
+                                     version: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                                     expected: release.version, current: current) else {
+                try FileManager.default.removeItem(at: staged)
+                throw UpdateError.badSignature
+            }
 
             // Swap after we quit, then relaunch the new copy.
-            let script = """
-            while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
-            rm -rf "\(target.path)" && mv "\(staged.path)" "\(target.path)" && open "\(target.path)"
-            rm -rf "\(work.path)"
-            """
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/sh")
-            p.arguments = ["-c", script]
+            p.arguments = ["-c", UpdateReplacement.script, "myvocab-update", String(ProcessInfo.processInfo.processIdentifier),
+                           target.path, staged.path, destination.path, target.path + ".backup-" + UUID().uuidString, work.path]
             try p.run()
             NSApp.terminate(nil)
         } catch UpdateError.badSignature {
@@ -113,7 +132,7 @@ import Security
     /// The new app must be valid and signed with our Developer ID team.
     static func signedByUs(_ app: URL) -> Bool {
         var code: SecStaticCode?, req: SecRequirement?
-        let r = "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""
+        let r = "identifier \"com.yixuanwu.lexikos\" and anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""
         guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
               SecRequirementCreateWithString(r as CFString, [], &req) == errSecSuccess else { return false }
         return SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate), req) == errSecSuccess
@@ -121,6 +140,7 @@ import Security
 
     private func download(_ url: URL, to dest: URL) async throws {
         let (bytes, response) = try await URLSession.shared.bytes(from: url)
+        try Self.validateHTTP(response)
         let total = Double(response.expectedContentLength)
         FileManager.default.createFile(atPath: dest.path, contents: nil)
         let h = try FileHandle(forWritingTo: dest)
@@ -136,7 +156,8 @@ import Security
         try h.write(contentsOf: buf)
     }
 
-    @discardableResult private func run(_ tool: String, _ args: [String]) -> Bool {
+    @discardableResult private nonisolated static func run(_ tool: String, _ args: [String]) async -> Bool {
+        await Task.detached {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = args
@@ -145,6 +166,7 @@ import Security
         guard (try? p.run()) != nil else { return false }
         p.waitUntilExit()
         return p.terminationStatus == 0
+        }.value
     }
 }
 
@@ -174,12 +196,8 @@ struct UpdateBanner: View {
                     Text("(\(l["update.current"]) \(updater.current))").foregroundStyle(Color.muted)
                     Spacer()
                     Button(l["update.later"]) { updater.dismissed = true }.buttonStyle(.plain).foregroundStyle(Color.muted)
-                    Button { Task { await updater.install() } } label: {
-                        Text(l["update.install"]).font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
-                    }
-                    .buttonStyle(.plain).focusable(false)
+                    Button(l["update.install"]) { Task { await updater.install() } }
+                        .buttonStyle(.capsule(.primary, accent))
                 }
             }
         }
@@ -190,8 +208,7 @@ struct UpdateBanner: View {
             .font(.system(size: 13)).foregroundStyle(Color.ink)
             .padding(.horizontal, 16).padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.line))
+            .paperCard(radius: 14)
     }
 }
 
@@ -199,15 +216,18 @@ struct UpdateSettings: View {
     let l: L
     @Environment(Updater.self) private var updater
     @AppStorage("autoUpdate") private var autoUpdate = true
+    @AppStorage("accent") private var accent = Accent.moss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Toggle(l["update.auto"], isOn: $autoUpdate).toggleStyle(.checkbox)
+            HStack(spacing: 10) {
+                PaperToggle(isOn: $autoUpdate, label: l["update.auto"], accent: accent)
+                Text(l["update.auto"]).font(.system(size: 12.5)).foregroundStyle(Color.ink)
                 Spacer()
-                Button(l["update.check"]) { Task { await updater.check() } }.disabled(updater.state == .checking)
+                Button(l["update.check"]) { Task { await updater.check() } }
+                    .buttonStyle(.capsule(.secondary, accent)).disabled(updater.state == .checking)
             }
-            Text(status).font(.system(size: 11)).foregroundStyle(Color.muted)
+            Text(status).font(.system(size: 11.5)).foregroundStyle(Color.muted).monospacedDigit()
         }
     }
 

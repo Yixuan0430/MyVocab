@@ -57,7 +57,7 @@ private struct T {
         "week": ["zh": "最近 7 天", "en": "Last 7 days", "fr": "7 derniers jours"],
         "word": ["zh": "每日一词", "en": "Word", "fr": "Le mot"],
         "words": ["zh": "最近学过的词", "en": "Recent words", "fr": "Mots récents"],
-        "empty": ["zh": "先在 Lexikos 里导入词库", "en": "Import a deck in Lexikos", "fr": "Importez un paquet dans Lexikos"],
+        "empty": ["zh": "先在 MyVocab 里导入词库", "en": "Import a deck in MyVocab", "fr": "Importez un paquet dans MyVocab"],
         "today.name": ["zh": "今日学习", "en": "Today", "fr": "Aujourd’hui"],
         "today.desc": ["zh": "今天要复习和学习的数量。", "en": "What is due and new today.", "fr": "Révisions et nouveautés du jour."],
         "word.desc": ["zh": "轮流显示你学过的单词。", "en": "Cycles through words you have learned.", "fr": "Fait défiler les mots appris."],
@@ -72,8 +72,8 @@ private var deviceLang: String {
 
 extension WidgetSnapshot {
     fileprivate var t: T { T(lang: lang) }
-    fileprivate var tint: Color { (Accent(rawValue: accent) ?? .sage).color }
-    fileprivate var soft: Color { (Accent(rawValue: accent) ?? .sage).soft }
+    fileprivate var tint: Color { (Accent(rawValue: accent) ?? .moss).color }
+    fileprivate var soft: Color { (Accent(rawValue: accent) ?? .moss).soft }
     fileprivate var left: Int { due + new }
     /// Share of today's work already done, for the rings.
     fileprivate var progress: Double { done + left == 0 ? 1 : Double(done) / Double(done + left) }
@@ -162,13 +162,13 @@ struct TodayView: View {
                 .gaugeStyle(.accessoryCircular).containerBackground(for: .widget) { Color.clear }
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {
-                Text("Lexikos").font(.headline).widgetAccentable()
+                Text("MyVocab").font(.headline).widgetAccentable()
                 Text("\(s.t["review"]) \(s.due) · \(s.t["new"]) \(s.new)")
                 Text(s.left == 0 ? s.t["clear"] : "\(s.t["done"]) \(s.done)").foregroundStyle(.secondary)
             }
             .containerBackground(for: .widget) { Color.clear }
         case .accessoryInline:
-            Text(s.left == 0 ? "Lexikos · \(s.t["clear"])" : "Lexikos · \(s.t["review"]) \(s.due) · \(s.t["new"]) \(s.new)")
+            Text(s.left == 0 ? "MyVocab · \(s.t["clear"])" : "MyVocab · \(s.t["review"]) \(s.due) · \(s.t["new"]) \(s.new)")
                 .containerBackground(for: .widget) { Color.clear }
         #endif
         case .systemMedium: medium.modifier(Panel())
@@ -179,7 +179,7 @@ struct TodayView: View {
 
     private var header: some View {
         HStack {
-            Text("Lexikos").font(.custom("Didot", size: 15)).foregroundStyle(s.tint)
+            Text("MyVocab").font(.custom("Didot", size: 15)).foregroundStyle(s.tint)
             Spacer()
             Text(s.written.formatted(.dateTime.weekday(.abbreviated).day())).font(.system(size: 11)).foregroundStyle(Color.muted)
         }
@@ -201,7 +201,7 @@ struct TodayView: View {
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Lexikos").font(.custom("Didot", size: 14)).foregroundStyle(s.tint)
+            Text("MyVocab").font(.custom("Didot", size: 14)).foregroundStyle(s.tint)
             bigRing.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 6)
             Text("\(s.t["review"]) \(s.due) · \(s.t["new"]) \(s.new)").font(.system(size: 11)).foregroundStyle(Color.muted)
                 .frame(maxWidth: .infinity).lineLimit(1).minimumScaleFactor(0.8)
@@ -212,7 +212,7 @@ struct TodayView: View {
         HStack(spacing: 18) {
             bigRing.frame(width: 104)
             VStack(alignment: .leading, spacing: 10) {
-                Text(s.deckName.isEmpty ? "Lexikos" : s.deckName).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.ink).lineLimit(1)
+                Text(s.deckName.isEmpty ? "MyVocab" : s.deckName).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.ink).lineLimit(1)
                 HStack(spacing: 16) {
                     Stat(value: s.due, label: s.t["review"])
                     Stat(value: s.new, label: s.t["new"])

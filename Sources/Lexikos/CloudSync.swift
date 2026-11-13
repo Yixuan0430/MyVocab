@@ -20,7 +20,7 @@ private struct CloudSyncModifier: ViewModifier {
         #if CLOUDKIT
         content
             .task {
-                guard sync == nil else { return }
+                guard Runtime.current.syncEnabled, sync == nil else { return }
                 settings = SettingsSync()
                 sync = Sync(decks: decks, progress: progress)
                 await sync?.syncNow()

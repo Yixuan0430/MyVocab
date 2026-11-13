@@ -48,6 +48,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>lexikos</string>
+				<string>myvocab</string>
 			</array>
 		</dict>
 	</array>

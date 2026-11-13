@@ -7,11 +7,17 @@ struct OverviewView: View {
     @Binding var route: Route?
     @Environment(ProgressStore.self) private var progress
     @AppStorage("lang") private var lang = AppLanguage.zh
-    @AppStorage("accent") private var accent = Accent.sage
+    @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("newPerDay") private var newPerDay = 20
     @AppStorage("groupSize") private var groupSize = 10
     @State private var selected: Int?
+    @State private var query = ""
+    @State private var filter = WordFilter.all
+    @State private var showAll = false
     @Environment(\.windowSize) private var size
+
+    enum WordFilter: String, CaseIterable { case all, weak, strong }
+    private static let topCount = 20
 
     private var l: L { L(lang: lang) }
     private var states: [Int: CardState] { progress.states(deck) }
@@ -21,7 +27,7 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Button { route = nil } label: { Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading) }
-                    .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted)
+                    .buttonStyle(.plain).foregroundStyle(Color.muted).keyboardShortcut(.cancelAction)
                 Spacer()
             }
             .padding(.bottom, 18)
@@ -66,10 +72,11 @@ struct OverviewView: View {
         }()
         return layout {
             VStack(alignment: .leading, spacing: 6) {
-                Text(deck.name.replacingOccurrences(of: "_", with: " "))
+                Text(deck.displayName)
                     .font(.system(size: 26, weight: .medium, design: .serif)).foregroundStyle(Color.ink).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
-                    .font(.system(size: 13)).foregroundStyle(Color.muted)
+                    .font(.system(size: 13)).foregroundStyle(Color.muted).monospacedDigit()
             }
             if !size.compact { Spacer() }
             HStack(spacing: 10) {
@@ -86,68 +93,72 @@ struct OverviewView: View {
                         Text("\(l["group.per"]) \(groupSize) \(l["group.words"])").font(.system(size: 13, weight: .medium)).monospacedDigit()
                         Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.muted)
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
                 }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).focusable(false)
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel(l["group.size"])
 
-                Button { route = .free(deck) } label: {
-                    Label(l["free"], systemImage: "shuffle").font(.system(size: 13, weight: .medium))
-                        .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
-                }
-                .buttonStyle(.plain).focusable(false)
+                Button { route = .free(deck) } label: { Label(l["free"], systemImage: "shuffle") }
+                    .buttonStyle(.capsule(.secondary, accent))
 
                 Button { route = .study(deck) } label: {
-                    let startTitle = p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"]
-                    Label(startTitle, systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 18).padding(.vertical, 9)
-                        .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
+                    Label(p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"], systemImage: "play.fill")
                 }
-                .buttonStyle(.plain).focusable(false)
-                .disabled(p.groupQueue.isEmpty).opacity(p.groupQueue.isEmpty ? 0.4 : 1)
+                .buttonStyle(.capsule(.primary, accent))
+                .keyboardShortcut(.defaultAction)
+                .disabled(p.groupQueue.isEmpty)
             }
         }
     }
 
+    /// Five disjoint-or-labelled counts in equal columns. Due, learning, mastered and unseen add up to the deck;
+    /// "studied today" is an activity count shown apart from that total.
     private var stats: some View {
-        let s = states.values
-        let unseen = max(0, deck.cards.count - s.count)
+        let dueSet = Set(plan.due)
+        let rest = states.filter { !dueSet.contains($0.key) }.values
+        let unseen = max(0, deck.cards.count - states.count)
         let items: [(String, Int, Color)] = [
-            (l["stat.due"], plan.due.count, gradeColor(.forgot)),
-            (l["stat.learning"], s.filter { !$0.mastered }.count, gradeColor(.vague)),
-            (l["stat.mastered"], s.filter(\.mastered).count, gradeColor(.remembered)),
-            (l["stat.unseen"], unseen, Color.muted),
-            (l["stat.today"], plan.learnedToday, accent.color),
+            (l["stat.due"], dueSet.count, Color.neg),
+            (l["stat.learning"], rest.filter { !$0.mastered }.count, Color.warn),
+            (l["stat.mastered"], rest.filter(\.mastered).count, Color.pos),
+            (l["stat.unseen"], unseen, Color.faint),
+            (l["stat.today"], plan.learnedToday, accent.fill),
         ]
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
-            ForEach(items, id: \.0) { item in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Circle().fill(item.2).frame(width: 7, height: 7)
-                        Text(item.0).font(.system(size: 12)).foregroundStyle(Color.muted)
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: size.width < 640 ? 3 : 5)
+        return VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(Array(items.enumerated()), id: \.offset) { k, item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Circle().fill(item.2).frame(width: 7, height: 7)
+                            Text(item.0).font(.system(size: 12)).foregroundStyle(Color.muted).lineLimit(1)
+                        }
+                        Text("\(item.1)").font(.system(size: 26, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
+                            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
                     }
-                    Text("\(item.1)").font(.system(size: 26, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
-                        .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(k == 4 ? accent.faint : Color.panel))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.lineSoft))
+                    .accessibilityElement(children: .combine)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.line))
             }
+            Text(String(format: l["stat.total"], deck.cards.count))
+                .font(.system(size: 11.5)).foregroundStyle(Color.muted).monospacedDigit().padding(.leading, 4)
         }
     }
 
     private func panel<C: View>(_ title: String, _ sub: String, @ViewBuilder _ c: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.ink)
+            Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.ink).accessibilityAddTraits(.isHeader)
             Text(sub).font(.system(size: 12)).foregroundStyle(Color.muted).padding(.bottom, 10)
+                .fixedSize(horizontal: false, vertical: true)
             c()
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.panel))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.line))
+        .paperCard()
     }
 
     // MARK: Charts
@@ -172,64 +183,123 @@ struct OverviewView: View {
     }
 
     private var curve: some View {
-        Chart(curvePoints) { p in
-            LineMark(x: .value("day", p.day), y: .value("%", p.value))
-                .foregroundStyle(by: .value("series", p.series))
-                .lineStyle(StrokeStyle(lineWidth: 2, dash: p.series == l["curve.ebbinghaus"] ? [4, 4] : []))
-                .interpolationMethod(.monotone)
+        Chart {
+            ForEach(curvePoints) { p in
+                LineMark(x: .value("day", p.day), y: .value("%", p.value))
+                    .foregroundStyle(by: .value("series", p.series))
+                    .lineStyle(StrokeStyle(lineWidth: p.series == l["curve.ebbinghaus"] ? 1.5 : 2.5,
+                                           dash: p.series == l["curve.ebbinghaus"] ? [4, 4] : []))
+                    .interpolationMethod(.monotone)
+            }
+            RuleMark(y: .value("90", 90)).foregroundStyle(Color.pos.opacity(0.35)).lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
         }
-        .chartForegroundStyleScale([l["curve.ebbinghaus"]: Color.muted, l["curve.yours"]: accent.color])
+        .chartForegroundStyleScale([l["curve.ebbinghaus"]: Color.faint, l["curve.yours"]: accent.fill])
         .chartXScale(domain: 0...30)
         .chartYScale(domain: 0...100)
         .chartXAxis { AxisMarks(values: [0, 7, 14, 21, 30]) { v in
-            AxisGridLine().foregroundStyle(Color.line)
+            AxisGridLine().foregroundStyle(Color.lineSoft)
             AxisValueLabel { Text("\(v.as(Int.self) ?? 0)\(l["unit.d"])").foregroundStyle(Color.muted) }
         } }
-        .chartYAxis { AxisMarks(values: [0, 50, 90, 100]) { v in
-            AxisGridLine().foregroundStyle(Color.line)
+        .chartYAxis { AxisMarks(values: [0, 25, 50, 75, 90]) { v in
+            AxisGridLine().foregroundStyle(Color.lineSoft)
             AxisValueLabel { Text("\(v.as(Int.self) ?? 0)%").foregroundStyle(Color.muted) }
         } }
         .chartLegend(position: .bottom, alignment: .leading)
         .frame(height: 200)
     }
 
+    /// Today's backlog (which can be hundreds) is a number of its own so it doesn't flatten the bars for the days after.
     private var forecast: some View {
         let cal = Calendar.current, start = cal.startOfDay(for: .now)
-        let counts = (0..<14).map { d in
-            states.values.filter {
-                let day = cal.dateComponents([.day], from: start, to: cal.startOfDay(for: $0.due)).day ?? 0
-                return d == 0 ? day <= 0 : day == d
-            }.count
+        var counts = Array(repeating: 0, count: 14)
+        for st in states.values {
+            let day = cal.dateComponents([.day], from: start, to: cal.startOfDay(for: st.due)).day ?? 0
+            counts[min(13, max(0, day))] += day <= 13 ? 1 : 0
         }
-        return Chart(Array(counts.enumerated()), id: \.offset) { d, n in
-            BarMark(x: .value("day", d), y: .value("n", n), width: 12)
-                .foregroundStyle(d == 0 ? accent.color : accent.color.opacity(0.45))
-                .cornerRadius(3)
-        }
-        .chartXScale(domain: -0.6...13.6)
-        .chartXAxis { AxisMarks(values: [0, 4, 8, 12]) { v in
-            AxisValueLabel {
-                let d = v.as(Int.self) ?? 0
-                Text(d == 0 ? l["today"] : "+\(d)\(l["unit.d"])").foregroundStyle(Color.muted)
+        let backlog = counts[0], next = Array(counts.dropFirst())
+        let week = next.prefix(7).reduce(0, +), fortnight = next.reduce(0, +)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 22) {
+                figure(l["forecast.backlog"], backlog, backlog > 0 ? Color.neg : Color.pos)
+                figure(l["forecast.week"], week, accent.fill)
+                figure(l["forecast.fortnight"], fortnight, Color.faint)
+                Spacer(minLength: 0)
             }
-        } }
-        .chartYAxis { AxisMarks { v in
-            AxisGridLine().foregroundStyle(Color.line)
-            AxisValueLabel { Text("\(v.as(Int.self) ?? 0)").foregroundStyle(Color.muted) }
-        } }
-        .frame(height: 200)
+            if fortnight == 0 {
+                Text(l["forecast.empty"]).font(.system(size: 12)).foregroundStyle(Color.muted)
+                    .frame(maxWidth: .infinity, minHeight: 112)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.well))
+            } else {
+                Chart(Array(next.enumerated()), id: \.offset) { k, n in
+                    BarMark(x: .value("day", k + 1), y: .value("n", n), width: 12)
+                        .foregroundStyle(k < 7 ? accent.fill : accent.fill.opacity(0.45))
+                        .cornerRadius(3)
+                }
+                .chartXScale(domain: 0.4...13.6)
+                .chartXAxis { AxisMarks(values: [1, 4, 7, 10, 13]) { v in
+                    AxisValueLabel { Text("+\(v.as(Int.self) ?? 0)\(l["unit.d"])").foregroundStyle(Color.muted) }
+                } }
+                .chartYAxis { AxisMarks { v in
+                    AxisGridLine().foregroundStyle(Color.lineSoft)
+                    AxisValueLabel { Text("\(v.as(Int.self) ?? 0)").foregroundStyle(Color.muted) }
+                } }
+                .frame(height: 130)
+            }
+        }
+    }
+
+    private func figure(_ k: String, _ v: Int, _ c: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(v)").font(.system(size: 22, weight: .medium, design: .serif)).foregroundStyle(Color.ink).monospacedDigit()
+            HStack(spacing: 5) {
+                Circle().fill(c).frame(width: 6, height: 6)
+                Text(k).font(.system(size: 11.5)).foregroundStyle(Color.muted).lineLimit(1)
+            }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Words
+
+    private func retentionColor(_ r: Double) -> Color { r < 0.5 ? Color.neg : r < 0.8 ? Color.warn : Color.pos }
 
     private var words: some View {
         let now = Date.now, cal = Calendar.current
         let todayStart = cal.startOfDay(for: now)
         let endOfDay = cal.date(byAdding: .day, value: 1, to: todayStart)!
-        let rows = states.map { ($0.key, $0.value, $0.value.retention(at: now)) }.sorted { $0.2 < $1.2 }
+        let all = states.map { ($0.key, $0.value, $0.value.retention(at: now)) }.sorted { $0.2 < $1.2 }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let matched = all.filter { i, _, r in
+            switch filter {
+            case .all: break
+            case .weak: if r >= 0.8 { return false }
+            case .strong: if r < 0.8 { return false }
+            }
+            guard !q.isEmpty, deck.cards.indices.contains(i) else { return true }
+            return deck.cards[i].front.lowercased().contains(q) || deck.cards[i].back.lowercased().contains(q)
+        }
+        let rows = showAll || !q.isEmpty ? matched : Array(matched.prefix(Self.topCount))
         return VStack(spacing: 0) {
-            if rows.isEmpty {
+            if !all.isEmpty {
+                HStack(spacing: 8) {
+                    SearchBox(text: $query, prompt: l["words.search"]).frame(maxWidth: 260)
+                    ForEach(WordFilter.allCases, id: \.self) { f in
+                        Chip(title: l["words.\(f.rawValue)"], selected: filter == f, accent: accent) { filter = f }
+                    }
+                    Spacer(minLength: 0)
+                    if !size.narrow {
+                        Text(String(format: l["words.count"], rows.count, all.count))
+                            .font(.system(size: 11.5)).foregroundStyle(Color.muted).monospacedDigit()
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+            if all.isEmpty {
                 Text(l["words.empty"]).font(.system(size: 13)).foregroundStyle(Color.muted).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if rows.isEmpty {
+                Text(l["words.none"]).font(.system(size: 13)).foregroundStyle(Color.muted).padding(.vertical, 14)
             }
             ForEach(rows, id: \.0) { i, st, r in
                 let isDueToday = st.step > 0 || st.due < endOfDay
@@ -240,22 +310,32 @@ struct OverviewView: View {
                             .font(.system(size: 14)).foregroundStyle(Color.ink).lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         ZStack(alignment: .leading) {
-                            Capsule().fill(Color.line)
-                            Capsule().fill(r < 0.8 ? gradeColor(.forgot) : r < 0.9 ? gradeColor(.vague) : gradeColor(.remembered))
-                                .frame(width: 120 * r)
+                            Capsule().fill(Color.well)
+                            Capsule().fill(retentionColor(r)).frame(width: max(3, 120 * r))
                         }
-                        .frame(width: 120, height: 6)
+                        .frame(width: size.narrow ? 60 : 120, height: 6)
                         Text("\(Int(r * 100))%").font(.system(size: 12)).monospacedDigit().foregroundStyle(Color.muted)
                             .frame(width: 38, alignment: .trailing)
                         Text(isDueToday ? l["due.now"] : PracticeView.interval(calDays, l))
-                            .font(.system(size: 12)).foregroundStyle(isDueToday ? accent.color : Color.muted).frame(width: 70, alignment: .trailing)
-                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Color.muted.opacity(0.6))
+                            .font(.system(size: 12, weight: isDueToday ? .medium : .regular))
+                            .foregroundStyle(isDueToday ? Color.neg : Color.muted).monospacedDigit()
+                            .frame(width: 70, alignment: .trailing)
+                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Color.faint)
                     }
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 9).padding(.horizontal, 4)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).focusable(false)
-                Rectangle().fill(Color.line).frame(height: 1)
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                Rectangle().fill(Color.lineSoft).frame(height: 1)
+            }
+            if q.isEmpty && matched.count > Self.topCount {
+                Button { withAnimation(.easeOut(duration: 0.2)) { showAll.toggle() } } label: {
+                    Label(showAll ? l["words.less"] : String(format: l["words.more"], matched.count),
+                          systemImage: showAll ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.capsule(.soft, accent))
+                .padding(.top, 12)
             }
         }
     }
@@ -293,16 +373,16 @@ struct WordCurveSheet: View {
                 Text(CardParts.splitGloss(card.front).0).font(.system(size: 26, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
                 Text(CardParts(card).answer).font(.system(size: 15)).foregroundStyle(Color.muted).lineLimit(1)
                 Spacer()
-                Button { dismiss() } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted).keyboardShortcut(.cancelAction)
+                Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 28, height: 28) }
+                    .buttonStyle(.plain).accessibilityLabel(l["ok"]).foregroundStyle(Color.muted).keyboardShortcut(.cancelAction)
             }
             Text(l["word.sub"]).font(.system(size: 12)).foregroundStyle(Color.muted).padding(.bottom, 8)
             Chart {
                 ForEach(points) { p in
                     AreaMark(x: .value("t", p.date), y: .value("%", p.value), series: .value("s", p.segment))
-                        .foregroundStyle(accent.color.opacity(0.10))
+                        .foregroundStyle(accent.fill.opacity(0.12))
                     LineMark(x: .value("t", p.date), y: .value("%", p.value), series: .value("s", p.segment))
-                        .foregroundStyle(accent.color)
+                        .foregroundStyle(accent.fill)
                 }
                 ForEach(state.reviews, id: \.date) { r in
                     PointMark(x: .value("t", r.date), y: .value("%", 100))

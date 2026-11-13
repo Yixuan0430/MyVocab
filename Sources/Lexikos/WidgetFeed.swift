@@ -14,7 +14,7 @@ private struct WidgetFeedModifier: ViewModifier {
     @AppStorage("newPerDay") private var newPerDay = 20
     @AppStorage("startDeck") private var startDeck = ""
     @AppStorage("lang") private var lang = AppLanguage.zh
-    @AppStorage("accent") private var accent = Accent.sage
+    @AppStorage("accent") private var accent = Accent.moss
 
     private var stamp: [AnyHashable] {
         [progress.events.values.map(\.count).reduce(0, +), decks.decks.count, newPerDay, startDeck, lang.rawValue, accent.rawValue]
@@ -30,6 +30,7 @@ private struct WidgetFeedModifier: ViewModifier {
     }
 
     private func write() {
+        guard Runtime.current.syncEnabled else { return }
         let cal = Calendar.current, now = Date.now
         let tomorrow = cal.date(byAdding: .day, value: 1, to: now)!
         var s = WidgetSnapshot(lang: lang.rawValue, accent: accent.rawValue)

@@ -241,22 +241,61 @@ extension Deck {
     @ObservationIgnored private(set) var byID: [UUID: ReviewEvent] = [:]
     /// Called for every event recorded on this device (the sync engine uploads them).
     @ObservationIgnored var onRecord: ((ReviewEvent) -> Void)?
+    var storageRoot: URL { dir.deletingLastPathComponent() }
     private let dir: URL
 
-    init(dir: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Lexikos/progress", isDirectory: true)) {
+    var lastError: String?
+    private var blockedDecks: Set<UUID> = []
+
+    init(dir: URL = Runtime.current.root.appendingPathComponent("progress")) {
         self.dir = dir
-        Migration.run()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        Self.migrateSnapshots(in: dir)
+        do {
+            if dir.path == Runtime.current.root.appendingPathComponent("progress").path && Runtime.current.migrationEnabled { try Migration.run() }
+            if !Runtime.current.readOnly {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try Self.migrateSnapshots(in: dir)
+            }
+        } catch { lastError = error.localizedDescription }
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         for f in files where f.pathExtension == "jsonl" {
-            guard let id = UUID(uuidString: f.deletingPathExtension().lastPathComponent),
-                  let text = try? String(contentsOf: f, encoding: .utf8) else { continue }
-            events[id] = text.split(separator: "\n").compactMap { try? JSONDecoder().decode(ReviewEvent.self, from: Data($0.utf8)) }
+            guard let id = UUID(uuidString: f.deletingPathExtension().lastPathComponent) else { continue }
+            guard let text = try? String(contentsOf: f, encoding: .utf8) else {
+                blockedDecks.insert(id); lastError = "无法读取进度：" + f.lastPathComponent; continue
+            }
+            var loaded: [ReviewEvent] = []
+            var seen: Set<UUID> = []
+            for line in text.split(separator: "\n") {
+                do {
+                    let e = try JSONDecoder().decode(ReviewEvent.self, from: Data(line.utf8))
+                    guard e.deck == id else { throw CocoaError(.fileReadCorruptFile) }
+                    if seen.insert(e.id).inserted { loaded.append(e) }
+                } catch {
+                    blockedDecks.insert(id)
+                    lastError = "进度日志损坏，已保留原文件并停止写入：" + f.lastPathComponent
+                }
+            }
+            events[id] = loaded
             replayed[id] = ReviewEvent.replay(events[id]!)
             for e in events[id]! { byID[e.id] = e }
         }
+        // Read-only clients can inspect pre-log installations without migrating any files.
+        if Runtime.current.readOnly {
+            let decksDir = dir.deletingLastPathComponent().appendingPathComponent("decks")
+            for f in files where f.pathExtension == "json" {
+                guard let id = UUID(uuidString: f.deletingPathExtension().lastPathComponent), events[id] == nil else { continue }
+                do {
+                    let old = try JSONDecoder().decode([Int: CardState].self, from: Data(contentsOf: f))
+                    let deck = try JSONDecoder().decode(Deck.self, from: Data(contentsOf: decksDir.appendingPathComponent(f.lastPathComponent)))
+                    let keys = deck.keys
+                    let seeds = old.filter { keys.indices.contains($0.key) }.map { i, state in
+                        ReviewEvent(id: Self.seedID(deck: id, card: keys[i], state), deck: id, card: keys[i], date: state.lastReview, kind: .seed(state))
+                    }
+                    events[id] = seeds; replayed[id] = ReviewEvent.replay(seeds)
+                    for e in seeds { byID[e.id] = e }
+                } catch { lastError = error.localizedDescription }
+            }
+        }
+
     }
 
     func states(_ deck: Deck) -> [Int: CardState] {
@@ -266,15 +305,15 @@ extension Deck {
         return out
     }
 
-    func introduce(_ deck: Deck, card: Int, now: Date = .now) {
+    @discardableResult func introduce(_ deck: Deck, card: Int, now: Date = .now) -> Bool {
         record(ReviewEvent(deck: deck.id, card: deck.keys[card], date: now, kind: .introduce))
     }
 
-    func grade(_ deck: Deck, card: Int, _ g: Grade, now: Date = .now) {
+    @discardableResult func grade(_ deck: Deck, card: Int, _ g: Grade, now: Date = .now) -> Bool {
         record(ReviewEvent(deck: deck.id, card: deck.keys[card], date: now, kind: .grade(g)))
     }
 
-    func forget(_ deck: Deck, now: Date = .now) {
+    @discardableResult func forget(_ deck: Deck, now: Date = .now) -> Bool {
         record(ReviewEvent(deck: deck.id, card: "", date: now, kind: .reset))
     }
 
@@ -282,22 +321,22 @@ extension Deck {
     @discardableResult func merge(_ incoming: [ReviewEvent]) -> Int {
         var added = 0
         for (deck, batch) in Dictionary(grouping: incoming, by: \.deck) {
-            let known = Set((events[deck] ?? []).map(\.id))
-            let fresh = batch.filter { !known.contains($0.id) }
+            var known = Set(byID.keys)
+            let fresh = batch.filter { known.insert($0.id).inserted }
             guard !fresh.isEmpty else { continue }
+            guard persist(fresh, deck: deck) else { continue }
             events[deck, default: []] += fresh
             for e in fresh { byID[e.id] = e }
-            append(fresh, deck: deck)
             replayed[deck] = ReviewEvent.replay(events[deck]!)
             added += fresh.count
         }
         return added
     }
 
-    private func record(_ e: ReviewEvent) {
+    private func record(_ e: ReviewEvent) -> Bool {
+        guard persist([e], deck: e.deck) else { return false }
         events[e.deck, default: []].append(e)
         byID[e.id] = e
-        append([e], deck: e.deck)
         // Replaying one event onto the current state equals a full replay unless it is older than the newest.
         if let last = events[e.deck]?.dropLast().max(by: <), !(last < e) {
             replayed[e.deck] = ReviewEvent.replay(events[e.deck]!)
@@ -305,23 +344,23 @@ extension Deck {
             replayed[e.deck] = ReviewEvent.replay([e], onto: replayed[e.deck] ?? [:])
         }
         onRecord?(e)
+        return true
     }
 
-    private func append(_ batch: [ReviewEvent], deck: UUID) {
-        let url = dir.appendingPathComponent("\(deck.uuidString).jsonl")
-        let lines = batch.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
-        if let h = try? FileHandle(forWritingTo: url) {
-            defer { try? h.close() }
-            _ = try? h.seekToEnd()
-            try? h.write(contentsOf: lines)
-        } else {
-            try? lines.write(to: url)
-        }
+    private func persist(_ batch: [ReviewEvent], deck: UUID) -> Bool {
+        guard !Runtime.current.readOnly, !blockedDecks.contains(deck) else { return false }
+        do {
+            let url = dir.appendingPathComponent("\(deck.uuidString).jsonl")
+            let data = try (events[deck, default: []] + batch).map { try JSONEncoder().encode($0) + Data("\n".utf8) }.reduce(Data(), +)
+            try data.write(to: url, options: .atomic)
+            lastError = nil
+            return true
+        } catch { lastError = error.localizedDescription; return false }
     }
 
     /// One-time conversion of the old `<deck>.json` snapshots (card index → state) into seed events.
     /// The snapshot is kept as `<deck>.json.legacy`.
-    static func migrateSnapshots(in dir: URL) {
+    static func migrateSnapshots(in dir: URL) throws {
         let fm = FileManager.default
         let decksDir = dir.deletingLastPathComponent().appendingPathComponent("decks")
         let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
@@ -337,8 +376,8 @@ extension Deck {
                 ReviewEvent(id: seedID(deck: id, card: keys[i], s), deck: id, card: keys[i], date: s.lastReview, kind: .seed(s))
             }
             let data = seeds.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
-            guard (try? data.write(to: log)) != nil else { continue }
-            try? fm.moveItem(at: f, to: f.appendingPathExtension("legacy"))
+            try data.write(to: log, options: .atomic)
+            try fm.moveItem(at: f, to: f.appendingPathExtension("legacy"))
         }
     }
 
@@ -371,7 +410,7 @@ extension Deck {
         let s = states(deck), cal = Calendar.current
         let endOfDay = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
         // Sort due cards: intraday learning/relearning steps (step > 0) first, then due reviews by due date.
-        let due = s.filter { $0.value.step > 0 || $0.value.due < endOfDay }
+        let due = s.filter { $0.value.step > 0 ? $0.value.due <= now : $0.value.due < endOfDay }
             .sorted { a, b in
                 let aLearn = a.value.step > 0, bLearn = b.value.step > 0
                 if aLearn != bLearn { return aLearn }
@@ -389,7 +428,7 @@ extension Deck {
 
         let size = max(1, groupSize)
         let groupDue = Array(due.prefix(size))
-        let groupNew = Array(allUnseen.prefix(max(0, size - groupDue.count)))
+        let groupNew = Array(freshDaily.prefix(max(0, size - groupDue.count)))
 
         let learnedToday = s.values.filter {
             $0.reviews.contains { cal.isDate($0.date, inSameDayAs: now) }

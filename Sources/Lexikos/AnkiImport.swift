@@ -134,16 +134,34 @@ enum AnkiImport {
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_step(stmt) == SQLITE_ROW, let p = sqlite3_column_blob(stmt, 0) else { return ("", "") }
         let bytes = Array(UnsafeBufferPointer(start: p.assumingMemoryBound(to: UInt8.self), count: Int(sqlite3_column_bytes(stmt, 0))))
+        return decodeFormats(bytes)
+    }
+
+    static func decodeFormats(_ bytes: [UInt8]) -> (String, String) {
         var i = 0, strings: [Int: String] = [:]
-        func varint() -> Int { var r = 0, s = 0; while i < bytes.count { let b = bytes[i]; i += 1; r |= Int(b & 0x7F) << s; if b < 0x80 { break }; s += 7 }; return r }
+        func varint() -> Int? {
+            var result: UInt64 = 0
+            for shift in stride(from: 0, through: 63, by: 7) {
+                guard i < bytes.count else { return nil }
+                let byte = bytes[i]; i += 1
+                guard shift < 63 || byte <= 1 else { return nil }
+                result |= UInt64(byte & 0x7f) << shift
+                if byte < 0x80 { return Int(exactly: result) }
+            }
+            return nil
+        }
         while i < bytes.count {
-            let key = varint(), field = key >> 3
+            guard let key = varint(), key > 0 else { return ("", "") }
+            let field = key >> 3
             switch key & 7 {
-            case 0: _ = varint()
-            case 2: let n = varint(); if i + n <= bytes.count { strings[field] = String(decoding: bytes[i..<i + n], as: UTF8.self) }; i += n
-            case 1: i += 8
-            case 5: i += 4
-            default: i = bytes.count
+            case 0: guard varint() != nil else { return ("", "") }
+            case 2:
+                guard let n = varint(), n <= bytes.count - i else { return ("", "") }
+                strings[field] = String(decoding: bytes[i..<i + n], as: UTF8.self)
+                i += n
+            case 1: guard bytes.count - i >= 8 else { return ("", "") }; i += 8
+            case 5: guard bytes.count - i >= 4 else { return ("", "") }; i += 4
+            default: return ("", "")
             }
         }
         return (strings[1] ?? "", strings[2] ?? "")

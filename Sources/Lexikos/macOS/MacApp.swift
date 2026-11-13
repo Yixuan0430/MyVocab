@@ -6,10 +6,15 @@ struct LexikosApp: App {
     @State private var store = DeckStore()
     @State private var progress = ProgressStore()
     @State private var updater = Updater()
-    @AppStorage("lang") private var lang = AppLanguage.zh
-    @AppStorage("appearance") private var appearance = Appearance.system.rawValue
+    @AppStorage("lang", store: Runtime.current.defaults) private var lang = AppLanguage.zh
+    @AppStorage("appearance", store: Runtime.current.defaults) private var appearance = Appearance.system.rawValue
 
     init() {
+        AppTheme.shared.load(from: Runtime.current.defaults)
+        if CommandLine.arguments.contains("--learning-report") {
+            do { try LearningReport.write(decks: store, progress: progress); exit(0) }
+            catch { fputs("学习报告失败: \(error)\n", stderr); exit(1) }
+        }
         if CommandLine.arguments.contains("--dump") {
             for n in 0...9999 { let e = FrenchNumbers.entry(n); print("\(n)\t\(e.word)\t/\(e.ipa)/") }
             exit(0)
@@ -55,8 +60,9 @@ struct LexikosApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Lexikos") {
+        WindowGroup("MyVocab") {
             RootView()
+                .defaultAppStorage(Runtime.current.defaults)
                 .environment(\.locale, Locale(identifier: lang.rawValue))
                 .environment(store)
                 .environment(progress)
@@ -71,13 +77,19 @@ struct LexikosApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 820, height: 600)
 
-        Settings { SettingsView().environment(updater).padding(24).frame(width: 460) }
+        Settings {
+            SettingsView()
+                .defaultAppStorage(Runtime.current.defaults)
+                .environment(\.locale, Locale(identifier: lang.rawValue))
+                .environment(updater).environment(store).environment(progress)
+                .frame(width: 540, height: 640)
+        }
     }
 }
 
 /// CloudKit announces changes from other devices with silent pushes.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
-        NSApplication.shared.registerForRemoteNotifications()
+        if Runtime.current.syncEnabled { NSApplication.shared.registerForRemoteNotifications() }
     }
 }

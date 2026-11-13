@@ -1,9 +1,11 @@
 import AVFoundation
 import NaturalLanguage
+import Observation
 
 /// Text-to-speech played through a time-stretch unit, because system voices largely ignore
 /// `AVSpeechUtterance.rate`: slowing the rendered audio is the only reliable "slow" mode.
-final class Speaker {
+@MainActor @Observable final class Speaker {
+    private(set) var lastError: String?
     private let synth = AVSpeechSynthesizer()
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -14,7 +16,8 @@ final class Speaker {
     init() {
         #if os(iOS)
         // Speak even with the ring/silent switch on, like other language apps.
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: .duckOthers)
+        do { try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: .duckOthers) }
+        catch { lastError = error.localizedDescription }
         #endif
         engine.attach(player)
         engine.attach(stretch)
@@ -30,11 +33,16 @@ final class Speaker {
         u.rate = slow ? 0.42 : AVSpeechUtteranceDefaultSpeechRate
         stretch.rate = slow ? 0.5 : 1
         synth.write(u) { [weak self] buffer in
+            DispatchQueue.main.async { [weak self] in
             guard let self, mine == self.token, let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0,
                   let floats = self.toFloat(pcm) else { return }
-            self.connect(floats.format)
-            self.player.scheduleBuffer(floats)
-            if !self.player.isPlaying { self.player.play() }
+            do {
+                try self.connect(floats.format)
+                self.player.scheduleBuffer(floats)
+                if !self.player.isPlaying { self.player.play() }
+                self.lastError = nil
+            } catch { self.lastError = error.localizedDescription }
+            }
         }
     }
 
@@ -50,14 +58,14 @@ final class Speaker {
         return r.dominantLanguage?.rawValue ?? "fr"
     }
 
-    private func connect(_ f: AVAudioFormat) {
+    private func connect(_ f: AVAudioFormat) throws {
         if format != f {
             engine.stop()
             engine.connect(player, to: stretch, format: f)
             engine.connect(stretch, to: engine.mainMixerNode, format: f)
             format = f
         }
-        if !engine.isRunning { try? engine.start() }
+        if !engine.isRunning { try engine.start() }
     }
 
     private func toFloat(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
@@ -66,7 +74,7 @@ final class Speaker {
                                     channels: b.format.channelCount, interleaved: false),
               let out = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: b.frameLength),
               let conv = AVAudioConverter(from: b.format, to: f) else { return nil }
-        try? conv.convert(to: out, from: b)
-        return out
+        do { try conv.convert(to: out, from: b); return out }
+        catch { lastError = error.localizedDescription; return nil }
     }
 }

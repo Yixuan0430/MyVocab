@@ -11,7 +11,7 @@ settings:
     CURRENT_PROJECT_VERSION: 1
     SWIFT_VERSION: 5.0
     GENERATE_INFOPLIST_FILE: YES
-    INFOPLIST_KEY_CFBundleDisplayName: Lexikos
+    INFOPLIST_KEY_CFBundleDisplayName: MyVocab
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.education
     SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CLOUDKIT"
 packages:
@@ -25,15 +25,17 @@ targets:
         excludes: ["iOS/**"]
       - path: Resources/Lexikos.icns
         buildPhase: resources
+      - path: scripts/myvocab-mcp.py
+        buildPhase: resources
     dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-macOS }]
     info:
       path: Config/Lexikos-macOS-Info.plist
       properties:
         CFBundleIconFile: Lexikos
-        CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos] }]
+        CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos, myvocab] }]
     settings:
       base:
-        PRODUCT_NAME: Lexikos
+        PRODUCT_NAME: MyVocab
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_CFBundleIconFile: Lexikos
@@ -59,7 +61,7 @@ targets:
     dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-iOS }]
     settings:
       base:
-        PRODUCT_NAME: Lexikos
+        PRODUCT_NAME: MyVocab
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -70,7 +72,7 @@ targets:
       path: Config/Lexikos-iOS-Info.plist
       properties:
         UIBackgroundModes: [remote-notification]
-        CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos] }]
+        CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos, myvocab] }]
         LSSupportsOpeningDocumentsInPlace: false
         CFBundleDocumentTypes:
           - CFBundleTypeName: Anki deck
@@ -105,7 +107,7 @@ targets:
         PRODUCT_NAME: LexikosWidgets
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos.widgets
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_CFBundleDisplayName: Lexikos
+        INFOPLIST_KEY_CFBundleDisplayName: MyVocab
     info:
       path: Config/LexikosWidgets-iOS-Info.plist
       properties:
@@ -123,7 +125,7 @@ targets:
         PRODUCT_NAME: LexikosWidgets
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos.widgets
         ENABLE_HARDENED_RUNTIME: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Lexikos
+        INFOPLIST_KEY_CFBundleDisplayName: MyVocab
     info:
       path: Config/LexikosWidgets-macOS-Info.plist
       properties:
