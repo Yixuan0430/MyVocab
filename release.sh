@@ -83,7 +83,7 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 ditto build/MyVocab.app "$STAGE/MyVocab.app"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "MyVocab" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+hdiutil create -quiet -volname "MyVocab" -srcfolder "$STAGE" -fs HFS+ -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
 SIGN_IDENTITY="${SIGN_ID:-$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
 [ -n "$SIGN_IDENTITY" ] || { echo "未找到 Developer ID Application 证书" >&2; exit 1; }
