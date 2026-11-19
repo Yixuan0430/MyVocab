@@ -1,7 +1,6 @@
 import SwiftUI
 import Charts
 
-/// A deck's home: today's plan, memory stats, forgetting curves and per-word retention.
 struct OverviewView: View {
     let deck: Deck
     @Binding var route: Route?
@@ -56,8 +55,6 @@ struct OverviewView: View {
         }
     }
 
-    // MARK: Today
-
     private var today: some View {
         let p = plan
         let layout = size.compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
@@ -101,6 +98,7 @@ struct OverviewView: View {
 
                 Button { route = .free(deck) } label: { Label(l["free"], systemImage: "shuffle") }
                     .buttonStyle(.capsule(.secondary, accent))
+                    .disabled(deck.cards.isEmpty)
 
                 Button { route = .study(deck) } label: {
                     Label(p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"], systemImage: "play.fill")
@@ -112,16 +110,14 @@ struct OverviewView: View {
         }
     }
 
-    /// Five disjoint-or-labelled counts in equal columns. Due, learning, mastered and unseen add up to the deck;
-    /// "studied today" is an activity count shown apart from that total.
     private var stats: some View {
         let dueSet = Set(plan.due)
         let rest = states.filter { !dueSet.contains($0.key) }.values
         let unseen = max(0, deck.cards.count - states.count)
         let items: [(String, Int, Color)] = [
             (l["stat.due"], dueSet.count, Color.neg),
-            (l["stat.learning"], rest.filter { !$0.mastered }.count, Color.warn),
-            (l["stat.mastered"], rest.filter(\.mastered).count, Color.pos),
+            (l["stat.learning"], rest.filter { !$0.isProficient }.count, Color.warn),
+            (l["stat.mastered"], rest.filter(\.isProficient).count, Color.pos),
             (l["stat.unseen"], unseen, Color.faint),
             (l["stat.today"], plan.learnedToday, accent.fill),
         ]
@@ -161,13 +157,17 @@ struct OverviewView: View {
         .paperCard()
     }
 
-    // MARK: Charts
+    private static let ebbinghaus: [(Double, Double)] = [
+        (0, 100), (0.33, 58.2), (1, 44.2), (8.8, 35.8),
+        (24, 33.7), (48, 27.8), (144, 25.4), (744, 21.1)
+    ]
 
-    /// Ebbinghaus (1885) savings data: hours since learning → % retained.
-    private static let ebbinghaus: [(Double, Double)] = [(0, 100), (0.33, 58.2), (1, 44.2), (8.8, 35.8),
-                                                         (24, 33.7), (48, 27.8), (144, 25.4), (744, 21.1)]
-
-    private struct CurvePoint: Identifiable { let id = UUID(); let day: Double; let value: Double; let series: String }
+    private struct CurvePoint: Identifiable {
+        let day: Double
+        let value: Double
+        let series: String
+        var id: String { "\(series)-\(day)" }
+    }
 
     private var curvePoints: [CurvePoint] {
         let now = Date.now, learned = Array(states.values)
@@ -208,7 +208,6 @@ struct OverviewView: View {
         .frame(height: 200)
     }
 
-    /// Today's backlog (which can be hundreds) is a number of its own so it doesn't flatten the bars for the days after.
     private var forecast: some View {
         let cal = Calendar.current, start = cal.startOfDay(for: .now)
         var counts = Array(repeating: 0, count: 14)
@@ -260,8 +259,6 @@ struct OverviewView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: Words
-
     private func retentionColor(_ r: Double) -> Color { r < 0.5 ? Color.neg : r < 0.8 ? Color.warn : Color.pos }
 
     private var words: some View {
@@ -280,6 +277,7 @@ struct OverviewView: View {
             return deck.cards[i].front.lowercased().contains(q) || deck.cards[i].back.lowercased().contains(q)
         }
         let rows = showAll || !q.isEmpty ? matched : Array(matched.prefix(Self.topCount))
+        let barWidth: CGFloat = size.narrow ? 60 : 120
         return VStack(spacing: 0) {
             if !all.isEmpty {
                 HStack(spacing: 8) {
@@ -311,9 +309,9 @@ struct OverviewView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.well)
-                            Capsule().fill(retentionColor(r)).frame(width: max(3, 120 * r))
+                            Capsule().fill(retentionColor(r)).frame(width: max(3, barWidth * r))
                         }
-                        .frame(width: size.narrow ? 60 : 120, height: 6)
+                        .frame(width: barWidth, height: 6)
                         Text("\(Int(r * 100))%").font(.system(size: 12)).monospacedDigit().foregroundStyle(Color.muted)
                             .frame(width: 38, alignment: .trailing)
                         Text(isDueToday ? l["due.now"] : PracticeView.interval(calDays, l))
@@ -343,12 +341,17 @@ struct OverviewView: View {
 
 private struct IdentifiedInt: Identifiable { let id: Int }
 
-/// One word's full memory history: the sawtooth of forgetting and each review that reset it.
 struct WordCurveSheet: View {
     let card: Card, state: CardState, accent: Accent, l: L
     @Environment(\.dismiss) private var dismiss
 
-    private struct Pt: Identifiable { let id = UUID(); let date: Date; let value: Double; let segment: Int }
+    private struct Pt: Identifiable {
+        let segment: Int
+        let step: Int
+        let date: Date
+        let value: Double
+        var id: String { "\(segment)-\(step)" }
+    }
 
     private var points: [Pt] {
         let reviews = state.reviews.isEmpty
@@ -361,13 +364,15 @@ struct WordCurveSheet: View {
             let span = max(0, stop.timeIntervalSince(r.date))
             for step in 0...40 {
                 let t = r.date.addingTimeInterval(span * Double(step) / 40)
-                out.append(Pt(date: t, value: CardState.retention(days: max(0, t.timeIntervalSince(r.date)) / 86400, stability: r.stability) * 100, segment: k))
+                let val = CardState.retention(days: max(0, t.timeIntervalSince(r.date)) / 86400, stability: r.stability) * 100
+                out.append(Pt(segment: k, step: step, date: t, value: val))
             }
         }
         return out
     }
 
     var body: some View {
+        let indexedReviews = Array(state.reviews.enumerated())
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text(CardParts.splitGloss(card.front).0).font(.system(size: 26, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
@@ -384,7 +389,7 @@ struct WordCurveSheet: View {
                     LineMark(x: .value("t", p.date), y: .value("%", p.value), series: .value("s", p.segment))
                         .foregroundStyle(accent.fill)
                 }
-                ForEach(state.reviews, id: \.date) { r in
+                ForEach(indexedReviews, id: \.offset) { _, r in
                     PointMark(x: .value("t", r.date), y: .value("%", 100))
                         .foregroundStyle(gradeColor(r.grade)).symbolSize(60)
                 }
@@ -410,7 +415,7 @@ struct WordCurveSheet: View {
             }
             PageScroll {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(state.reviews.reversed(), id: \.date) { r in
+                    ForEach(Array(state.reviews.reversed().enumerated()), id: \.offset) { _, r in
                         HStack(spacing: 8) {
                             Circle().fill(gradeColor(r.grade)).frame(width: 7, height: 7)
                             Text(l["grade.\(r.grade)"]).font(.system(size: 12)).foregroundStyle(Color.ink).frame(width: 70, alignment: .leading)
@@ -424,7 +429,7 @@ struct WordCurveSheet: View {
             .frame(maxHeight: 110)
         }
         .padding(24)
-        .frame(width: 620)
+        .sheetWidth()
         .background(Color.bg)
     }
 
@@ -433,5 +438,15 @@ struct WordCurveSheet: View {
             Text(k).font(.system(size: 11)).foregroundStyle(Color.muted)
             Text(v).font(.system(size: 15, weight: .medium)).foregroundStyle(Color.ink).monospacedDigit()
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder func sheetWidth() -> some View {
+        #if os(macOS)
+        frame(width: 620)
+        #else
+        frame(maxWidth: .infinity)
+        #endif
     }
 }

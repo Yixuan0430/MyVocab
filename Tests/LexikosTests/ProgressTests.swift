@@ -6,11 +6,17 @@ final class ProgressTests: XCTestCase {
     private let deck = Deck(name: "t", cards: (0..<6).map { Card(front: "f\($0)", back: "b\($0)") })
     private let t0 = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
-    override func setUp() {
+    override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try! FileManager.default.createDirectory(at: root.appendingPathComponent("decks"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("decks"), withIntermediateDirectories: true)
     }
-    override func tearDown() { try? FileManager.default.removeItem(at: root) }
+
+    override func tearDownWithError() throws {
+        if let root, FileManager.default.fileExists(atPath: root.path) {
+            try FileManager.default.removeItem(at: root)
+        }
+    }
+
     private var progressDir: URL { root.appendingPathComponent("progress") }
 
     func testGradingMatchesDirectScheduler() {
@@ -21,7 +27,6 @@ final class ProgressTests: XCTestCase {
         let direct = CardState.next(CardState.next(CardState.introduce(nil, now: t0), .remembered, now: t0 + 90),
                                     .remembered, now: t0 + 4 * 86400)
         XCTAssertEqual(p.states(deck)[0], direct)
-        // And the log on disk replays to the same thing.
         XCTAssertEqual(ProgressStore(dir: progressDir).states(deck), p.states(deck))
     }
 

@@ -31,6 +31,8 @@ targets:
     info:
       path: Config/Lexikos-macOS-Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleIconFile: Lexikos
         CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos, myvocab] }]
     settings:
@@ -40,17 +42,12 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_CFBundleIconFile: Lexikos
       configs:
-        # Developer ID builds talk to CloudKit's production environment.
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Config/Lexikos-macOS.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: Config/Lexikos-macOS-Release.entitlements
-    entitlements:
-      path: Config/Lexikos-macOS.entitlements
-      properties:
-        com.apple.developer.icloud-container-identifiers: [iCloud.com.yixuanwu.lexikos]
-        com.apple.developer.icloud-services: [CloudKit]
-        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
-        com.apple.developer.aps-environment: development
-        com.apple.security.application-groups: [BGM8P5U985.com.yixuanwu.lexikos]
+          ARCHS: "$(ARCHS_STANDARD)"
+          ONLY_ACTIVE_ARCH: NO
   Lexikos-iOS:
     type: application
     platform: iOS
@@ -71,6 +68,8 @@ targets:
     info:
       path: Config/Lexikos-iOS-Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIBackgroundModes: [remote-notification]
         CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos, myvocab] }]
         LSSupportsOpeningDocumentsInPlace: false
@@ -94,7 +93,6 @@ targets:
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
         aps-environment: development
         com.apple.security.application-groups: [group.com.yixuanwu.lexikos]
-  # Home-screen / desktop widgets. They read the snapshot the app writes to the shared App Group.
   LexikosWidgets-iOS:
     type: app-extension
     platform: iOS
@@ -111,6 +109,8 @@ targets:
     info:
       path: Config/LexikosWidgets-iOS-Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension }
     entitlements:
       path: Config/LexikosWidgets-iOS.entitlements
@@ -126,9 +126,15 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos.widgets
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_CFBundleDisplayName: MyVocab
+      configs:
+        Release:
+          ARCHS: "$(ARCHS_STANDARD)"
+          ONLY_ACTIVE_ARCH: NO
     info:
       path: Config/LexikosWidgets-macOS-Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension }
     entitlements:
       path: Config/LexikosWidgets-macOS.entitlements

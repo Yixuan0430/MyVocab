@@ -10,18 +10,21 @@ struct LexikosWidgets: WidgetBundle {
     }
 }
 
-// MARK: Timeline
-
 struct Entry: TimelineEntry {
     var date: Date
     var s: WidgetSnapshot
-    /// Which word the word widget shows; advances every half hour.
     var turn = 0
 }
 
-private let sample = WidgetSnapshot(deckName: "French 5000", due: 23, new: 10, done: 14, week: [12, 30, 0, 18, 25, 40, 14], streak: 4,
-                                    words: [.init(front: "la mémoire", back: "memory"), .init(front: "apprendre", back: "to learn"),
-                                            .init(front: "le souvenir", back: "remembrance"), .init(front: "réviser", back: "to review")])
+private let sample = WidgetSnapshot(
+    deckName: "French 5000", due: 23, new: 10, done: 14, week: [12, 30, 0, 18, 25, 40, 14], streak: 4,
+    words: [
+        .init(front: "la mémoire", back: "memory"),
+        .init(front: "apprendre", back: "to learn"),
+        .init(front: "le souvenir", back: "remembrance"),
+        .init(front: "réviser", back: "to review"),
+    ]
+)
 
 struct Provider: TimelineProvider {
     func placeholder(in _: Context) -> Entry { Entry(date: .now, s: sample) }
@@ -31,7 +34,6 @@ struct Provider: TimelineProvider {
     func getTimeline(in _: Context, completion: @escaping (Timeline<Entry>) -> Void) {
         let s = WidgetSnapshot.load() ?? WidgetSnapshot()
         let start = Date.now, base = Int(start.timeIntervalSince1970 / 1800)
-        // Half-hourly entries for a day; each re-derives the counts so midnight rolls over on its own.
         let entries = (0..<48).map { i in
             let d = start.addingTimeInterval(Double(i) * 1800)
             return Entry(date: d, s: s.at(d), turn: base + i)
@@ -39,8 +41,6 @@ struct Provider: TimelineProvider {
         completion(Timeline(entries: entries, policy: .atEnd))
     }
 }
-
-// MARK: Strings & style
 
 private struct T {
     let lang: String
@@ -75,7 +75,6 @@ extension WidgetSnapshot {
     fileprivate var tint: Color { (Accent(rawValue: accent) ?? .moss).color }
     fileprivate var soft: Color { (Accent(rawValue: accent) ?? .moss).soft }
     fileprivate var left: Int { due + new }
-    /// Share of today's work already done, for the rings.
     fileprivate var progress: Double { done + left == 0 ? 1 : Double(done) / Double(done + left) }
 }
 
@@ -126,8 +125,6 @@ private struct Panel: ViewModifier {
         content.containerBackground(for: .widget) { Color.panel }
     }
 }
-
-// MARK: Today
 
 struct TodayWidget: Widget {
     var body: some WidgetConfiguration {
@@ -262,8 +259,6 @@ struct TodayView: View {
     }
 }
 
-// MARK: Word
-
 struct WordWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "word", provider: Provider()) { WordView(e: $0) }
@@ -330,8 +325,6 @@ struct WordView: View {
         }
     }
 }
-
-// MARK: Streak
 
 struct StreakWidget: Widget {
     var body: some WidgetConfiguration {

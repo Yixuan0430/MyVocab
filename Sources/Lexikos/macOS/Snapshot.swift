@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Dev aid: renders every page offscreen into PNGs — three widths, light / dark / 护眼, a few study states,
-/// plus full-length versions of the scrolling pages. Needs isolated storage (`--data-dir`), never the real library.
 @MainActor enum Snapshot {
     static func run(to dir: URL) {
         precondition(Runtime.current.isolated, "Snapshots require isolated storage")
@@ -15,7 +13,6 @@ import SwiftUI
             ?? [.light, .dark, .warm]
         let accents: [Accent] = (env["SNAPSHOT_ACCENTS"]?.split(separator: ",").compactMap { Accent(rawValue: String($0)) }) ?? [savedAccent]
         let deck = store.decks.max { $0.cards.count < $1.cards.count }
-        // A card with a notes panel shows the most of the study layout.
         let card = deck.flatMap { d in d.cards.indices.first { CardParts(d.cards[$0]).sections.count >= 2 } } ?? 0
 
         for accent in accents {
@@ -45,7 +42,6 @@ import SwiftUI
                     for (name, page, long) in pages {
                         render(page, size: size, dark: dark, store: store, progress: progress,
                                to: dir.appendingPathComponent("\(tag)-\(name)-\(Int(size.width)).png"))
-                        // Scrolling pages again at full length, so nothing below the fold goes unchecked.
                         if long {
                             render(page, size: CGSize(width: size.width, height: name == "overview" ? (size.width < 700 ? 2600 : 2000) : 1300), dark: dark,
                                    store: store, progress: progress, to: dir.appendingPathComponent("\(tag)-\(name)-\(Int(size.width))-full.png"))

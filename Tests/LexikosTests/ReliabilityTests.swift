@@ -17,7 +17,7 @@ final class ReliabilityTests: XCTestCase {
         var callbacks = 0
         store.onRecord = { _ in callbacks += 1 }
         try FileManager.default.removeItem(at: dir)
-        try Data().write(to: dir) // deterministic ENOTDIR, including when tests run as root
+        try Data().write(to: dir)
         XCTAssertFalse(store.grade(d, card: 0, .remembered))
         XCTAssertTrue(store.states(d).isEmpty)
         XCTAssertTrue(store.byID.isEmpty)
@@ -112,7 +112,7 @@ final class ReliabilityTests: XCTestCase {
         XCTAssertNil(production.temporaryDefaultsDomain)
     }
 
-    func testIsolationDefaults() {
+    func testIsolationDefaultsAndReadOnlyFlags() {
         let runtime = Runtime(arguments: ["MyVocab", "--snapshot", "/tmp/out"], environment: [:])
         defer { runtime.cleanup() }
         XCTAssertTrue(runtime.isolated)
@@ -123,6 +123,10 @@ final class ReliabilityTests: XCTestCase {
         defer { explicit.cleanup() }
         XCTAssertEqual(explicit.root.path, root.path)
         XCTAssertFalse(explicit.migrationEnabled)
+        let verify = Runtime(arguments: ["MyVocab", "--verify-signature", "/Applications/MyVocab.app"], environment: [:])
+        XCTAssertTrue(verify.readOnly)
+        XCTAssertFalse(verify.migrationEnabled)
+        XCTAssertFalse(verify.syncEnabled)
     }
 
     func testMigrationRetainsSourceAndIsIdempotent() throws {
@@ -158,6 +162,20 @@ final class ReliabilityTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), data)
     }
 
+    func testProgressOutOfBoundsAndCRLFLogs() throws {
+        let dir = root.appendingPathComponent("progress"), d = deck
+        let store = ProgressStore(dir: dir)
+        XCTAssertFalse(store.introduce(d, card: 999))
+        XCTAssertFalse(store.grade(d, card: -1, .remembered))
+        XCTAssertTrue(store.grade(d, card: 0, .remembered))
+        let file = dir.appendingPathComponent("\(d.id.uuidString).jsonl")
+        let raw = try XCTUnwrap(String(data: Data(contentsOf: file), encoding: .utf8))
+        try raw.replacingOccurrences(of: "\n", with: "\r\n").write(to: file, atomically: true, encoding: .utf8)
+        let reloaded = ProgressStore(dir: dir)
+        XCTAssertNil(reloaded.lastError)
+        XCTAssertEqual(reloaded.events[d.id]?.count, 1)
+    }
+
     @MainActor func testCloudDeletionMarkerWinsOverStaleDeck() throws {
         let decks = DeckStore(root: root), progress = ProgressStore(dir: root.appendingPathComponent("progress")), d = deck
         XCTAssertTrue(decks.upsert(d))
@@ -186,6 +204,60 @@ final class ReliabilityTests: XCTestCase {
         XCTAssertTrue(progress.byID.isEmpty)
     }
 
+    @MainActor func testSyncEnvironmentStateIsolationAndDeckTagPersistence() throws {
+        let decks = DeckStore(root: root), progress = ProgressStore(dir: root.appendingPathComponent("progress")), d = deck
+        let devSync = Sync(decks: decks, progress: progress, enabled: false, environment: "development")
+        let prodSync = Sync(decks: decks, progress: progress, enabled: false, environment: "production")
+        XCTAssertEqual(devSync.stateFile.lastPathComponent, "sync-state.json")
+        XCTAssertEqual(prodSync.stateFile.lastPathComponent, "sync-state-production.json")
+        XCTAssertEqual(prodSync.onServerFile.lastPathComponent, "sync-uploaded-production.json")
+
+        let asset = root.appendingPathComponent("deck-cards.json")
+        try JSONEncoder().encode(d.cards).write(to: asset)
+        let zoneID = CKRecordZone.ID(zoneName: "Lexikos")
+        let recordID = CKRecord.ID(recordName: "deck-" + d.id.uuidString, zoneID: zoneID)
+        let fetched = CKRecord(recordType: "Deck", recordID: recordID)
+        fetched["name"] = d.name
+        fetched["cards"] = CKAsset(fileURL: asset)
+        XCTAssertEqual(prodSync.apply([fetched], deleted: []), [recordID.recordName])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prodSync.recordTagsFile.path))
+
+        let reloadedSync = Sync(decks: decks, progress: progress, enabled: false, environment: "production")
+        let rebuilt = reloadedSync.record(for: recordID)
+        XCTAssertEqual(rebuilt?.recordID, recordID)
+        XCTAssertEqual(rebuilt?["name"] as? String, d.name)
+    }
+
+    @MainActor func testSettingsSyncValueEquality() {
+        XCTAssertTrue(SettingsSync.valuesEqual(nil, nil))
+        XCTAssertFalse(SettingsSync.valuesEqual(nil, "zh"))
+        XCTAssertTrue(SettingsSync.valuesEqual(20, 20))
+        XCTAssertFalse(SettingsSync.valuesEqual(20, 30))
+    }
+
+    func testWidgetSnapshotRolloverAcrossDays() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 10, hour: 12))!
+        let day2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 11, hour: 1))!
+        let day4 = cal.date(from: DateComponents(year: 2026, month: 11, day: 13, hour: 1))!
+        let snap = WidgetSnapshot(written: day1, due: 12, new: 5, done: 8, dueTomorrow: 4, newTomorrow: 10,
+                                  week: [1, 2, 3, 4, 5, 6, 7], streak: 5)
+        let nextDay = snap.at(day2, calendar: cal)
+        XCTAssertEqual(nextDay.written, day2)
+        XCTAssertEqual(nextDay.due, 4)
+        XCTAssertEqual(nextDay.new, 10)
+        XCTAssertEqual(nextDay.done, 0)
+        XCTAssertEqual(nextDay.week, [2, 3, 4, 5, 6, 7, 0])
+        XCTAssertEqual(nextDay.streak, 5)
+
+        let threeDaysLater = snap.at(day4, calendar: cal)
+        XCTAssertEqual(threeDaysLater.written, day4)
+        XCTAssertEqual(threeDaysLater.due, 12)
+        XCTAssertEqual(threeDaysLater.week, [4, 5, 6, 7, 0, 0, 0])
+        XCTAssertEqual(threeDaysLater.streak, 0)
+    }
+
     @MainActor func testUpdateValidation() throws {
         XCTAssertTrue(Updater.validIdentity(bundleID: "com.yixuanwu.lexikos", version: "1.2.0", expected: "1.2.0", current: "1.1.0"))
         XCTAssertFalse(Updater.validIdentity(bundleID: "other", version: "1.2.0", expected: "1.2.0", current: "1.1.0"))
@@ -196,20 +268,23 @@ final class ReliabilityTests: XCTestCase {
         XCTAssertFalse(Updater.signedByUs(root))
     }
 
-    func testUpdateRollbackWithQuotedPaths() throws {
+    func testUpdateRollbackWithQuotedPathsAndTempCleanup() throws {
         let old = root.appendingPathComponent("old '$().app"), staged = root.appendingPathComponent("missing.app")
         let backup = root.appendingPathComponent("backup.app"), dest = root.appendingPathComponent("MyVocab.app")
+        let work = root.appendingPathComponent("temp-work")
         try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         try Data("original".utf8).write(to: old.appendingPathComponent("marker"))
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", UpdateReplacement.script, "test", "99999999", old.path, staged.path, dest.path, backup.path, root.path]
+        process.arguments = ["-c", UpdateReplacement.script, "test", "99999999", old.path, staged.path, dest.path, backup.path, work.path]
         process.environment = ["MYVOCAB_UPDATE_TEST": "1"]
         process.standardError = FileHandle.nullDevice
         try process.run(); process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 1)
         XCTAssertEqual(try Data(contentsOf: old.appendingPathComponent("marker")), Data("original".utf8))
         XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: work.path))
         try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
         let success = Process()
         success.executableURL = process.executableURL; success.arguments = process.arguments; success.environment = process.environment
@@ -217,5 +292,6 @@ final class ReliabilityTests: XCTestCase {
         XCTAssertEqual(success.terminationStatus, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dest.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: work.path))
     }
 }

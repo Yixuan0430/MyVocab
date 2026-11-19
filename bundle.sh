@@ -1,17 +1,17 @@
 #!/bin/sh
-# Quick Mac build without Xcode (no iCloud sync). Usage: ./bundle.sh            (local, ad-hoc signed, this Mac's arch)
-#                                                     ./bundle.sh release    (universal, Developer ID signed, hardened runtime)
-set -e
+set -eu
 VERSION=1.1.0
 APP=build/MyVocab.app
-if [ "$1" = "release" ]; then
+MODE="${1:-}"
+if [ "$MODE" = "release" ]; then
     swift build -c release --arch arm64 --arch x86_64
     BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/MyVocab"
 else
     swift build -c release
     BIN="$(swift build -c release --show-bin-path)/MyVocab"
 fi
-rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/"
 cp Resources/Lexikos.icns scripts/myvocab-mcp.py "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -28,11 +28,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>$VERSION</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.education</string>
-<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>com.yixuanwu.lexikos</string><key>CFBundleURLSchemes</key><array><string>lexikos</string><string>myvocab</string></array></dict></array>
+<key>CFBundleURLTypes</key><array><dict>
+<key>CFBundleURLName</key><string>com.yixuanwu.lexikos</string>
+<key>CFBundleURLSchemes</key><array><string>lexikos</string><string>myvocab</string></array>
+</dict></array>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-if [ "$1" = "release" ]; then
+if [ "$MODE" = "release" ]; then
     codesign --force --options runtime --timestamp -s "${SIGN_ID:-Developer ID Application}" "$APP"
 else
     codesign --force -s - "$APP"

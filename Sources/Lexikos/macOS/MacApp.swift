@@ -20,11 +20,17 @@ struct LexikosApp: App {
             exit(0)
         }
         if CommandLine.arguments.contains("--parse") {
-            for d in DeckStore().decks { for c in d.cards {
-                let p = CardParts(c)
-                print("\(p.front) [\(p.tag ?? "")] → \(p.answer) | \(p.sections.map { "\($0.id)(\($0.items.count))" }.joined(separator: ", "))")
-                for sec in p.sections { for it in sec.items { print("   \(sec.id): \(it.fr.map { "FR[\($0)] EN[\(it.gloss ?? "")]" } ?? "TXT[\(it.text)]")") } }
-            } }
+            for d in DeckStore().decks {
+                for c in d.cards {
+                    let p = CardParts(c)
+                    print("\(p.front) [\(p.tag ?? "")] → \(p.answer) | \(p.sections.map { "\($0.id)(\($0.items.count))" }.joined(separator: ", "))")
+                    for sec in p.sections {
+                        for it in sec.items {
+                            print("   \(sec.id): \(it.fr.map { "FR[\($0)] EN[\(it.gloss ?? "")]" } ?? "TXT[\(it.text)]")")
+                        }
+                    }
+                }
+            }
             exit(0)
         }
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
@@ -38,7 +44,8 @@ struct LexikosApp: App {
         if let i = CommandLine.arguments.firstIndex(of: "--preview"), i + 1 < CommandLine.arguments.count {
             let cards = (try? Importer.anki(URL(fileURLWithPath: CommandLine.arguments[i + 1]))) ?? []
             print(cards.count, "cards")
-            for c in cards.prefix(Int(CommandLine.arguments.last!) ?? 4) {
+            let limit = CommandLine.arguments.last.flatMap(Int.init) ?? 4
+            for c in cards.prefix(limit) {
                 let p = CardParts(c)
                 print("── \(p.front) [\(p.tag ?? "")] /\(p.hint)/ → \(p.answer)")
                 for s in p.sections { for it in s.items { print("     \(s.id): \(it.fr ?? it.text)  ⟶ \(it.gloss ?? "")") } }
@@ -46,15 +53,27 @@ struct LexikosApp: App {
             exit(0)
         }
         if let i = CommandLine.arguments.firstIndex(of: "--reimport"), i + 2 < CommandLine.arguments.count {
+            guard let id = UUID(uuidString: CommandLine.arguments[i + 1]) else {
+                fputs("failed: invalid deck UUID\n", stderr)
+                exit(1)
+            }
             do {
-                try DeckStore().reimport(UUID(uuidString: CommandLine.arguments[i + 1])!, from: URL(fileURLWithPath: CommandLine.arguments[i + 2]))
+                try DeckStore().reimport(id, from: URL(fileURLWithPath: CommandLine.arguments[i + 2]))
                 print("reimported")
-            } catch { print("failed: \(error)") }
+            } catch {
+                fputs("failed: \(error)\n", stderr)
+                exit(1)
+            }
             exit(0)
         }
         if let i = CommandLine.arguments.firstIndex(of: "--import"), i + 1 < CommandLine.arguments.count {
-            do { try DeckStore().importFile(URL(fileURLWithPath: CommandLine.arguments[i + 1])); print("imported") }
-            catch { print("failed: \(error)") }
+            do {
+                try DeckStore().importFile(URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+                print("imported")
+            } catch {
+                fputs("failed: \(error)\n", stderr)
+                exit(1)
+            }
             exit(0)
         }
     }
@@ -87,7 +106,6 @@ struct LexikosApp: App {
     }
 }
 
-/// CloudKit announces changes from other devices with silent pushes.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         if Runtime.current.syncEnabled { NSApplication.shared.registerForRemoteNotifications() }

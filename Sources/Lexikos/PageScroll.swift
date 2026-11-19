@@ -8,7 +8,6 @@ extension EnvironmentValues {
     }
 }
 
-/// A vertical ScrollView, except while snapshotting (ImageRenderer cannot draw scroll views).
 struct PageScroll<Content: View>: View {
     @Environment(\.snapshotting) private var snapshotting
     @ViewBuilder var content: Content
@@ -18,7 +17,6 @@ struct PageScroll<Content: View>: View {
     }
 }
 
-/// A ScrollView along one axis; plain clipped content while snapshotting.
 struct SnapshotSafeScroll<Content: View>: View {
     let axis: Axis.Set
     @Environment(\.snapshotting) private var snapshotting
@@ -26,7 +24,8 @@ struct SnapshotSafeScroll<Content: View>: View {
     var body: some View {
         if snapshotting {
             content.frame(maxWidth: .infinity, maxHeight: axis == .vertical ? .infinity : nil, alignment: .topLeading).clipped()
+        } else {
+            ScrollView(axis) { content }.scrollIndicators(.never)
         }
-        else { ScrollView(axis) { content }.scrollIndicators(.never) }
     }
 }

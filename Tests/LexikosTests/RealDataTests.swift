@@ -1,12 +1,12 @@
 import XCTest
 @testable import Lexikos
 
-/// LEXIKOS_DATA must point to a COPY. Never accept the user's live storage root.
 final class RealDataTests: XCTestCase {
     private func copyRoot() throws -> URL {
         guard let path = ProcessInfo.processInfo.environment["LEXIKOS_DATA"] else { throw XCTSkip("LEXIKOS_DATA not set") }
         let root = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-        let live = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Lexikos").resolvingSymlinksInPath()
+        let live = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Lexikos").resolvingSymlinksInPath()
         guard root.path != live.path, !root.path.hasPrefix(live.path + "/") else { throw CocoaError(.fileWriteNoPermission) }
         return root
     }
@@ -21,7 +21,8 @@ final class RealDataTests: XCTestCase {
         for deck in decks.decks {
             let log = dir.appendingPathComponent("\(deck.id.uuidString).jsonl")
             let raw = try Data(contentsOf: log)
-            let events = try String(decoding: raw, as: UTF8.self).split(separator: "\n").map {
+            let text = try XCTUnwrap(String(data: raw, encoding: .utf8))
+            let events = try text.split(separator: "\n").map {
                 try JSONDecoder().decode(ReviewEvent.self, from: Data($0.utf8))
             }
             XCTAssertEqual(Set(first.events[deck.id, default: []].map(\.id)), Set(events.map(\.id)))

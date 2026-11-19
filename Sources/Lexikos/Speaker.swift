@@ -2,8 +2,6 @@ import AVFoundation
 import NaturalLanguage
 import Observation
 
-/// Text-to-speech played through a time-stretch unit, because system voices largely ignore
-/// `AVSpeechUtterance.rate`: slowing the rendered audio is the only reliable "slow" mode.
 @MainActor @Observable final class Speaker {
     private(set) var lastError: String?
     private let synth = AVSpeechSynthesizer()
@@ -12,15 +10,28 @@ import Observation
     private let stretch = AVAudioUnitTimePitch()
     private var format: AVAudioFormat?
     private var token = 0
+    @ObservationIgnored private nonisolated(unsafe) var configObserver: NSObjectProtocol?
 
     init() {
         #if os(iOS)
-        // Speak even with the ring/silent switch on, like other language apps.
         do { try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: .duckOthers) }
         catch { lastError = error.localizedDescription }
         #endif
         engine.attach(player)
         engine.attach(stretch)
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.format = nil
+                    self?.player.stop()
+                }
+            }
+    }
+
+    deinit {
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func say(_ text: String, language: String? = nil, slow: Bool = false) {
@@ -29,19 +40,19 @@ import Observation
         token += 1
         let mine = token
         let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: language ?? Self.language(of: text))
+        u.voice = Self.voice(for: language ?? Self.language(of: text))
         u.rate = slow ? 0.42 : AVSpeechUtteranceDefaultSpeechRate
         stretch.rate = slow ? 0.5 : 1
         synth.write(u) { [weak self] buffer in
             DispatchQueue.main.async { [weak self] in
-            guard let self, mine == self.token, let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0,
-                  let floats = self.toFloat(pcm) else { return }
-            do {
-                try self.connect(floats.format)
-                self.player.scheduleBuffer(floats)
-                if !self.player.isPlaying { self.player.play() }
-                self.lastError = nil
-            } catch { self.lastError = error.localizedDescription }
+                guard let self, mine == self.token, let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0,
+                      let floats = self.toFloat(pcm) else { return }
+                do {
+                    try self.connect(floats.format)
+                    self.player.scheduleBuffer(floats)
+                    if !self.player.isPlaying { self.player.play() }
+                    self.lastError = nil
+                } catch { self.lastError = error.localizedDescription }
             }
         }
     }
@@ -58,8 +69,15 @@ import Observation
         return r.dominantLanguage?.rawValue ?? "fr"
     }
 
+    private static func voice(for language: String) -> AVSpeechSynthesisVoice? {
+        if let exact = AVSpeechSynthesisVoice(language: language) { return exact }
+        if let base = language.split(separator: "-").first,
+           let fallback = AVSpeechSynthesisVoice(language: String(base)) { return fallback }
+        return AVSpeechSynthesisVoice(language: "fr")
+    }
+
     private func connect(_ f: AVAudioFormat) throws {
-        if format != f {
+        if format != f || !engine.isRunning {
             engine.stop()
             engine.connect(player, to: stretch, format: f)
             engine.connect(stretch, to: engine.mainMixerNode, format: f)
@@ -69,7 +87,7 @@ import Observation
     }
 
     private func toFloat(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        if b.format.commonFormat == .pcmFormatFloat32 { return b }
+        if b.format.commonFormat == .pcmFormatFloat32 && !b.format.isInterleaved { return b }
         guard let f = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: b.format.sampleRate,
                                     channels: b.format.channelCount, interleaved: false),
               let out = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: b.frameLength),

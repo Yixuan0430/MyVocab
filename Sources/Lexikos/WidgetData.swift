@@ -1,18 +1,17 @@
 import Foundation
 
-/// What the home-screen widgets show. The app writes it to the shared App Group container
-/// after every change; the widget extension only ever reads it.
 struct WidgetSnapshot: Codable {
     struct Word: Codable, Hashable { var front: String; var back: String }
 
     var written = Date()
     var lang = "zh"
-    var accent = "sage"
+    var accent = "moss"
     var deckName = ""
-    var due = 0, new = 0, done = 0
-    /// Counts for the day after `written`, so the widget can roll over at midnight without the app.
-    var dueTomorrow = 0, newTomorrow = 0
-    /// Cards reviewed on each of the last seven days, oldest first.
+    var due = 0
+    var new = 0
+    var done = 0
+    var dueTomorrow = 0
+    var newTomorrow = 0
     var week: [Int] = Array(repeating: 0, count: 7)
     var streak = 0
     var words: [Word] = []
@@ -38,14 +37,22 @@ struct WidgetSnapshot: Codable {
         try? data.write(to: file, options: .atomic)
     }
 
-    /// The snapshot as it stands at `date`: after midnight the "tomorrow" counts take over.
-    func at(_ date: Date) -> WidgetSnapshot {
-        guard !Calendar.current.isDate(date, inSameDayAs: written), date > written else { return self }
+    func at(_ date: Date, calendar: Calendar = .current) -> WidgetSnapshot {
+        let writtenDay = calendar.startOfDay(for: written)
+        let targetDay = calendar.startOfDay(for: date)
+        let dayGap = calendar.dateComponents([.day], from: writtenDay, to: targetDay).day ?? 0
+        guard dayGap > 0 else { return self }
         var s = self
-        s.due = dueTomorrow; s.new = newTomorrow; s.done = 0
-        if !Calendar.current.isDate(date, inSameDayAs: written.addingTimeInterval(86400)) { s.due = max(dueTomorrow, due) }
-        s.week = Array(week.dropFirst()) + [0]
-        if week.last == 0 { s.streak = 0 }
+        s.written = date
+        s.due = dayGap == 1 ? dueTomorrow : max(dueTomorrow, due)
+        s.new = newTomorrow
+        s.done = 0
+        let shift = min(7, dayGap)
+        let kept = week.count > shift ? Array(week.dropFirst(shift)) : []
+        s.week = kept + Array(repeating: 0, count: 7 - kept.count)
+        if dayGap >= 2 || week.last == 0 {
+            s.streak = 0
+        }
         return s
     }
 }

@@ -5,7 +5,6 @@ func hex(_ h: UInt32, _ a: Double = 1) -> Color {
     Color(red: Double(h >> 16 & 255) / 255, green: Double(h >> 8 & 255) / 255, blue: Double(h & 255) / 255, opacity: a)
 }
 
-/// Four-point sparkle with concave sides.
 func sparkle(_ c: CGPoint, _ r: CGFloat, _ waist: CGFloat = 0.18) -> Path {
     var p = Path()
     let pts = [CGPoint(x: c.x, y: c.y - r), CGPoint(x: c.x + r, y: c.y), CGPoint(x: c.x, y: c.y + r), CGPoint(x: c.x - r, y: c.y)]
@@ -18,10 +17,7 @@ func sparkle(_ c: CGPoint, _ r: CGFloat, _ waist: CGFloat = 0.18) -> Path {
     return p
 }
 
-/// Two word cards — the one in front shows a word's first letter — circled by the review orbit.
-/// The fine orbit and its three planets follow Synaxos: words coming round again. The star is the word that stuck.
 struct Icon: View {
-    /// iOS masks its own corners, so its icon is full-bleed with no tile or shadow.
     let fullBleed: Bool
     let oc = CGPoint(x: 512, y: 600), orx: CGFloat = 352, ory: CGFloat = 112, tilt = Angle(degrees: -12)
 
@@ -73,13 +69,11 @@ struct Icon: View {
 
     var art: some View {
         ZStack {
-            // Halo behind the star
             Circle()
                 .fill(RadialGradient(colors: [hex(0xf6c995, 0.5), hex(0xf3d2a8, 0.16), hex(0xf3d2a8, 0)],
                                      center: .center, startRadius: 0, endRadius: 240))
                 .frame(width: 480, height: 480).position(x: 690, y: 330)
 
-            // Back half of the orbit (behind the cards): a fine line, as in Synaxos
             orbit(from: 180, to: 360)
                 .stroke(hex(0xe0b27c, 0.6), style: StrokeStyle(lineWidth: 3, lineCap: .round))
             sphere(orbitPoint(195), 15, 0xd6dde8, 0x8193ad)
@@ -87,7 +81,6 @@ struct Icon: View {
             backCard
             frontCard
 
-            // Front half of the orbit, plus a fainter outer trace (one planet rides it)
             orbit(from: 0, to: 180)
                 .stroke(LinearGradient(colors: [hex(0xd49a5e, 0.9), hex(0xf0c48c), hex(0xd49a5e, 0.9)], startPoint: .leading, endPoint: .trailing),
                         style: StrokeStyle(lineWidth: 5, lineCap: .round))
@@ -98,7 +91,6 @@ struct Icon: View {
             sphere(orbitPoint(335), 17, 0xf6d2bb, 0xc98b6b)
             sphere(orbitPoint(28).applying(.init(translationX: 22, y: 30)), 11, 0xe8ecf2, 0x9aa6b8)
 
-            // The word that stuck
             sparkle(CGPoint(x: 712, y: 318), 96, 0.16)
                 .fill(LinearGradient(colors: [hex(0xf2c584), hex(0xc98a4b)], startPoint: .top, endPoint: .bottom))
                 .shadow(color: hex(0xf6c995, 0.6), radius: 18)
@@ -134,10 +126,22 @@ struct Icon: View {
 }
 
 @MainActor func render() {
+    guard CommandLine.arguments.count > 1 else {
+        fputs("Usage: make-icon.swift <output-png> [--ios]\n", stderr)
+        exit(1)
+    }
     let r = ImageRenderer(content: Icon(fullBleed: CommandLine.arguments.contains("--ios")))
     r.scale = 1
     guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-          let png = rep.representation(using: .png, properties: [:]) else { fatalError() }
-    try! png.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
+          let png = rep.representation(using: .png, properties: [:]) else {
+        fputs("Failed to render icon PNG\n", stderr)
+        exit(1)
+    }
+    do {
+        try png.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
+    } catch {
+        fputs("Failed to write icon PNG: \(error)\n", stderr)
+        exit(1)
+    }
 }
 MainActor.assumeIsolated { render() }

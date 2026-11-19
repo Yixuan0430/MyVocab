@@ -24,7 +24,6 @@ struct LexikosApp: App {
     }
 }
 
-/// CloudKit announces changes from other devices with silent pushes.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         if Runtime.current.syncEnabled { application.registerForRemoteNotifications() }

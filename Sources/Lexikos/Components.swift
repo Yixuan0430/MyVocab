@@ -1,17 +1,11 @@
 import SwiftUI
 
-// Shared building blocks so every page uses the same buttons, cards and controls (MyWallet's look:
-// 18 pt paper cards with a hairline and a soft shadow, capsule buttons, tabular numbers).
-
 extension Deck {
-    /// Deck file names use underscores for spaces; collapse runs of them ("1000__Essential" → "1000 Essential").
     var displayName: String {
         name.replacingOccurrences(of: "_", with: " ").split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
     }
 }
 
-/// Capsule buttons: `.primary` is the one main action on a page, `.secondary` an outlined alternative,
-/// `.soft` a tinted helper (listen, show notes).
 struct CapsuleButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, soft }
     var kind: Kind = .primary
@@ -42,12 +36,10 @@ extension ButtonStyle where Self == CapsuleButtonStyle {
 }
 
 extension Color {
-    /// Shadow colour: a dark ink by day, pure black at night (a light shadow would read as a glow).
     static var shade: Color { .dyn(0x1F2328, 0x000000) }
 }
 
 extension View {
-    /// A paper card: panel fill, hairline border, soft two-layer shadow.
     func paperCard(radius: CGFloat = 18, padding: CGFloat? = nil) -> some View {
         self.padding(padding ?? 0)
             .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Color.panel))
@@ -57,7 +49,6 @@ extension View {
     }
 }
 
-/// Page background: the palette's paper with a soft glow in its warm and cool colours, as in MyDay.
 struct AmbientBackground: View {
     var body: some View {
         GeometryReader { g in
@@ -73,7 +64,6 @@ struct AmbientBackground: View {
     }
 }
 
-/// Small uppercase section heading.
 struct SectionLabel: View {
     let text: String
     var body: some View {
@@ -82,10 +72,9 @@ struct SectionLabel: View {
     }
 }
 
-/// A selectable capsule, used instead of system segmented pickers (and drawable in snapshots).
 struct Chip: View {
     let title: String
-    var icon: String? = nil
+    var icon: String?
     let selected: Bool
     let accent: Accent
     let action: () -> Void
@@ -108,7 +97,6 @@ struct Chip: View {
     }
 }
 
-/// On/off switch drawn in the palette colours.
 struct PaperToggle: View {
     @Binding var isOn: Bool
     let label: String
@@ -130,7 +118,6 @@ struct PaperToggle: View {
     }
 }
 
-/// − value + with a menu of common values on the number.
 struct NumberStepper: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
@@ -172,7 +159,6 @@ struct NumberStepper: View {
     }
 }
 
-/// Search box; a plain text stand-in while snapshotting (ImageRenderer cannot draw text fields).
 struct SearchBox: View {
     @Binding var text: String
     let prompt: String

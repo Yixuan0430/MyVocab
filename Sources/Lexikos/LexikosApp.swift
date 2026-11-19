@@ -15,11 +15,13 @@ enum Route: Hashable { case numbers, overview(Deck), study(Deck), free(Deck) }
 struct RootView: View {
     @Environment(DeckStore.self) private var store
     @Environment(ProgressStore.self) private var progress
+    @AppStorage("lang") private var lang = AppLanguage.zh
     @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("appearance") private var appearance = Appearance.system
     @State private var route: Route?
 
     var body: some View {
+        let l = L(lang: lang)
         GeometryReader { geo in
             ZStack {
                 AmbientBackground()
@@ -29,7 +31,7 @@ struct RootView: View {
         }
         .overlay(alignment: .bottom) {
             if let message = store.lastError ?? progress.lastError {
-                Label("保存失败，请重试：" + message, systemImage: "exclamationmark.triangle")
+                Label(l["err.save"] + message, systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(Color.ink)
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .paperCard(radius: 12)
@@ -43,17 +45,15 @@ struct RootView: View {
     }
 
     @ViewBuilder private var content: some View {
-            switch route {
-            case nil: HomeView(route: $route)
-            case .numbers: PracticeView(source: .numbers, route: $route)
-            case .overview(let d): OverviewView(deck: d, route: $route)
-            case .study(let d): PracticeView(source: .study(d), route: $route).id("study-\(d.id)")
-            case .free(let d): PracticeView(source: .free(d), route: $route).id("free-\(d.id)")
-            }
+        switch route {
+        case nil: HomeView(route: $route)
+        case .numbers: PracticeView(source: .numbers, route: $route)
+        case .overview(let d): OverviewView(deck: d, route: $route)
+        case .study(let d): PracticeView(source: .study(d), route: $route).id("study-\(d.id)")
+        case .free(let d): PracticeView(source: .free(d), route: $route).id("free-\(d.id)")
+        }
     }
 }
-
-// MARK: - Home
 
 struct HomeView: View {
     @Binding var route: Route?
@@ -131,15 +131,15 @@ struct HomeView: View {
         .frame(maxWidth: 1200)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, size.gutter).padding(.top, size.top)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "apkg") ?? .data,
-                                                                     .commaSeparatedText, .tabSeparatedText, .plainText]) { result in
+        .fileImporter(isPresented: $importing, allowedContentTypes: [
+            UTType(filenameExtension: "apkg") ?? .data,
+            .commaSeparatedText, .tabSeparatedText, .plainText
+        ]) { result in
             guard case .success(let url) = result else { return }
             let target = reimportTarget
             reimportTarget = nil
             load(url, into: target)
         }
-        // A deck shared to MyVocab from Files, AirDrop, Mail…
-        // …or lexikos:// / myvocab://study from a widget.
         .onOpenURL { url in
             guard ["lexikos", "myvocab"].contains(url.scheme ?? "") else { return load(url, into: nil) }
             if url.host == "study", let d = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
@@ -187,7 +187,6 @@ struct HomeView: View {
                 .font(.system(size: 24, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
         }
         .fixedSize()
-        // Numbers never wrap: when they don't fit beside the heading, the next layout is used instead.
         let numbers = HStack(spacing: 26) {
             ForEach([(l["stat.due"], due, Color.neg), (l["today.new"], new, accent.color), (l["stat.today"], done, Color.pos)], id: \.0) { k, v, c in
                 VStack(alignment: .leading, spacing: 3) {
@@ -226,7 +225,6 @@ struct HomeView: View {
         .shadow(color: Color.shade.opacity(0.06), radius: 16, y: 10)
     }
 
-    /// Deck chooser + start button. The chooser is a menu dressed as a deck row, not a system pop-up.
     @ViewBuilder private var startPanel: some View {
         if let chosen = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
             let p = progress.plan(chosen, newPerDay: newPerDay, groupSize: groupSize)
@@ -281,7 +279,7 @@ struct HomeView: View {
 
 struct DeckTile: View {
     let title: String, detail: String, glyph: String, accent: Accent
-    var progress: Double? = nil
+    var progress: Double?
     let action: () -> Void
     @State private var hover = false
 
@@ -344,9 +342,6 @@ struct ImportTile: View {
     }
 }
 
-// MARK: - Settings
-
-/// Grouped form in the macOS System Settings manner; controls are drawn in the palette colours.
 struct SettingsView: View {
     @AppStorage("lang") private var lang = AppLanguage.zh
     @AppStorage("appearance") private var appearance = Appearance.system

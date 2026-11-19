@@ -1,10 +1,6 @@
 import SwiftUI
 import Observation
 
-// The look is shared with MyDay and MyWallet (same developer, one family): a palette is a whole mood —
-// its own paper, ink, an accent for buttons and selection, and a warm and a cool colour for charts and the
-// soft ambient glow. The display mode picks the surfaces: 白天 uses the palette's paper, 夜间 and 护眼 keep
-// their own surfaces and borrow only the palette's accent, warm and cool.
 extension Color {
     static func dyn(_ light: UInt32, _ dark: UInt32, alpha: (CGFloat, CGFloat) = (1, 1)) -> Color {
         #if os(macOS)
@@ -15,16 +11,11 @@ extension Color {
         #endif
     }
     private static var t: AppTheme { AppTheme.shared }
-    /// Page background.
     static var bg: Color { t.color(\.bg) }
-    /// Cards and panels.
     static var panel: Color { t.color(\.card) }
-    /// Inset areas inside a panel (search fields, chips, tracks).
     static var well: Color { t.color(\.well) }
     static var ink: Color { t.color(\.ink) }
-    /// Secondary text; dark enough for 11–13 pt captions on paper.
     static var muted: Color { t.color(\.ink2) }
-    /// Tertiary text and hints.
     static var faint: Color { t.color(\.ink3) }
     static var line: Color { t.color(\.line) }
     static var lineSoft: Color { t.color(\.lineSoft) }
@@ -35,7 +26,6 @@ extension Color {
     static var warn: Color { t.color(\.warn) }
 }
 
-/// Resolved colours for one palette in one display mode (hex, light/dark pair chosen by `AppTheme`).
 struct ThemeTokens {
     var bg, card, well, ink, ink2, ink3, line, lineSoft: UInt32
     var accent, accentInk, accentText, accentSoft, accentFaint: UInt32
@@ -50,7 +40,6 @@ struct Palette {
     let accent: UInt32, warm: UInt32, cool: UInt32
     let paper: Paper
 
-    // Night is a warm graphite and 护眼 a soft parchment, as in MyDay / MyWallet.
     static let night = Paper(bg: 0x131211, surface: 0x181716, strong: 0x1D1C1A, muted: 0x262422, line: 0x2B2926,
                              lineStrong: 0x3B3834, ink: 0xECE6DF, mutedText: 0xA0978D)
     static let eyeCare = Paper(bg: 0xF4ECDC, surface: 0xF8F1E3, strong: 0xFBF6EA, muted: 0xEFE5D1, line: 0xE2D5BB,
@@ -89,15 +78,12 @@ enum Hex {
         func m(_ s: UInt32) -> UInt32 { UInt32(max(0, min(255, (ch(a, s) + (ch(b, s) - ch(a, s)) * t).rounded()))) << s }
         return m(16) | m(8) | m(0)
     }
-    /// Dark ink on light colours, white on dark ones (the MyDay rule).
     static func contrast(_ c: UInt32) -> UInt32 {
         let l = (Double(c >> 16 & 0xFF) * 0.299 + Double(c >> 8 & 0xFF) * 0.587 + Double(c & 0xFF) * 0.114) / 255
         return l > 0.48 ? 0x1F2B28 : 0xFFFFFF
     }
 }
 
-/// The palette and display mode in use. Views read colours through `Color.bg` etc.; Observation
-/// redraws them when either changes.
 @Observable final class AppTheme: @unchecked Sendable {
     static let shared = AppTheme()
     var accent: Accent = .moss
@@ -108,7 +94,6 @@ enum Hex {
         appearance = defaults.string(forKey: "appearance").flatMap(Appearance.init(rawValue:)) ?? .system
     }
 
-    /// Light and dark token sets for the current palette; 护眼 replaces the light set.
     var pair: (ThemeTokens, ThemeTokens) {
         let p = accent.palette
         return (p.tokens(appearance == .warm ? .eyeCare : .light), p.tokens(.dark))
@@ -134,7 +119,6 @@ extension PlatformColor {
 }
 
 extension View {
-    /// Apple's minimum 44 pt hit area for small text buttons on touch screens; no change on the Mac.
     func touchTarget(_ alignment: Alignment = .center) -> some View {
         #if os(iOS)
         frame(minWidth: 44, minHeight: 44, alignment: alignment).contentShape(Rectangle())
@@ -143,8 +127,6 @@ extension View {
         #endif
     }
 }
-
-// MARK: Window-size adaptation
 
 private struct WindowSizeKey: EnvironmentKey { static let defaultValue = CGSize(width: 820, height: 600) }
 extension EnvironmentValues {
@@ -155,12 +137,9 @@ extension EnvironmentValues {
 }
 
 extension CGSize {
-    /// Side margin: tight on narrow windows, wider on large ones.
     var gutter: CGFloat { width < 640 ? 20 : width < 1100 ? 36 : 56 }
     var compact: Bool { width < 760 }
-    /// Phone-width layout: tighter headers.
     var narrow: Bool { width < 500 }
-    /// Space above page content; on iOS the safe area already clears the status bar.
     var top: CGFloat {
         #if os(iOS)
         8
@@ -168,20 +147,18 @@ extension CGSize {
         40
         #endif
     }
-    /// Type scale for the practice card, relative to the default 820×600 window.
     var cardScale: CGFloat { min(1.5, max(0.72, min(width / 820, height / 600))) }
 }
 
-/// The stored "accent" setting. It now names a whole MyDay/MyWallet palette; the six accents of earlier
-/// versions stay valid raw values and map to their closest palette, so existing settings keep working.
 enum Accent: String, CaseIterable, Identifiable {
     case moss, pinegold, sunecho, hazeapricot, apricotmist, roseSage, dusklavender, hazelamp, deepsea, seablue, cloudsand
-    case sage, blue, gold, rose, violet, terracotta // before MyVocab
+    case sage, blue, gold, rose, violet, terracotta
     var id: String { rawValue }
 
-    /// What Settings offers; legacy values are never shown.
-    static let choices: [Accent] = [.moss, .pinegold, .sunecho, .hazeapricot, .apricotmist, .roseSage,
-                                    .dusklavender, .hazelamp, .deepsea, .seablue, .cloudsand]
+    static let choices: [Accent] = [
+        .moss, .pinegold, .sunecho, .hazeapricot, .apricotmist, .roseSage,
+        .dusklavender, .hazelamp, .deepsea, .seablue, .cloudsand
+    ]
 
     var resolved: Accent {
         switch self {
@@ -231,11 +208,8 @@ enum Accent: String, CaseIterable, Identifiable {
         let p = palette, mode = AppTheme.shared.appearance
         return Color.dyn(p.tokens(mode == .warm ? .eyeCare : .light)[keyPath: k], p.tokens(.dark)[keyPath: k])
     }
-    /// Accent for text, icons and chart lines: readable on paper.
     var color: Color { token(\.accentText) }
-    /// Accent for filled buttons and selection.
     var fill: Color { token(\.accent) }
-    /// Text and icons on `fill`.
     var onFill: Color { token(\.accentInk) }
     var soft: Color { token(\.accentSoft) }
     var faint: Color { token(\.accentFaint) }
@@ -247,7 +221,6 @@ enum Appearance: String, CaseIterable, Identifiable {
     var scheme: ColorScheme? { [.system: nil, .light: .light, .warm: .light, .dark: .dark][self]! }
     var icon: String { [.light: "sun.max", .dark: "moon", .warm: "leaf", .system: "circle.lefthalf.filled"][self]! }
     #if os(macOS)
-    /// Applied app-wide so sheets and menus follow too. 护眼 is a light appearance with its own paper.
     func apply() {
         NSApp.appearance = switch self {
         case .system: nil
@@ -264,7 +237,6 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     var label: String { ["zh": "中文", "en": "English", "fr": "Français"][rawValue]! }
 }
 
-/// UI strings in Chinese, English and French.
 struct L {
     let lang: AppLanguage
     subscript(_ key: String) -> String { L.table[key]?[lang.rawValue] ?? key }
@@ -273,7 +245,11 @@ struct L {
         "slow": ["zh": "慢速", "en": "Slow", "fr": "Lent"],
         "remaining": ["zh": "剩余", "en": "left", "fr": "restantes"],
         "tap.grade": ["zh": "选择记忆程度", "en": "Rate how well you knew it", "fr": "Évaluez votre mémoire"],
-        "keys.study": ["zh": "空格 显示/继续 · 1 没记住 · 2 模糊 · 3 记住了 · S 朗读 · A 慢速", "en": "Space reveal · 1 forgot · 2 vague · 3 knew it · S listen · A slow", "fr": "Espace révéler · 1 oublié · 2 flou · 3 su · S écouter · A lent"],
+        "keys.study": [
+            "zh": "空格 显示/继续 · 1 没记住 · 2 模糊 · 3 记住了 · S 朗读 · A 慢速",
+            "en": "Space reveal · 1 forgot · 2 vague · 3 knew it · S listen · A slow",
+            "fr": "Espace révéler · 1 oublié · 2 flou · 3 su · S écouter · A lent"
+        ],
         "grade.forgot": ["zh": "没记住", "en": "Forgot", "fr": "Oublié"],
         "grade.vague": ["zh": "模糊", "en": "Vague", "fr": "Flou"],
         "grade.remembered": ["zh": "记住了", "en": "Knew it", "fr": "Su"],
@@ -292,11 +268,19 @@ struct L {
         "group.words": ["zh": "词", "en": "words", "fr": "mots"],
         "group.label": ["zh": "本组", "en": "Group", "fr": "Groupe"],
         "group.nextInfo": ["zh": "下一组", "en": "Next group", "fr": "Prochain groupe"],
-        "group.reviewsClear": ["zh": "待复习已全部清零，可继续按组学习新词", "en": "All due reviews cleared; continue with new word groups anytime", "fr": "Révisions à jour ; continuez par groupes de nouveaux mots"],
+        "group.reviewsClear": [
+            "zh": "待复习已全部清零，可继续按组学习新词",
+            "en": "All due reviews cleared; continue with new word groups anytime",
+            "fr": "Révisions à jour ; continuez par groupes de nouveaux mots"
+        ],
         "start.group": ["zh": "开始本组学习", "en": "Start group", "fr": "Commencer le groupe"],
         "start.nextGroup": ["zh": "再学一组", "en": "Study another group", "fr": "Encore un groupe"],
         "free.setup.title": ["zh": "自由练习", "en": "Free practice", "fr": "Entraînement libre"],
-        "free.setup.sub": ["zh": "设置本次练习随机抽取的单词数量", "en": "Choose how many random words to practice this session", "fr": "Choisissez le nombre de mots pour cette séance"],
+        "free.setup.sub": [
+            "zh": "设置本次练习随机抽取的单词数量",
+            "en": "Choose how many random words to practice this session",
+            "fr": "Choisissez le nombre de mots pour cette séance"
+        ],
         "free.count": ["zh": "本次练习词数", "en": "Words to practice", "fr": "Nombre de mots"],
         "free.all": ["zh": "全部", "en": "All", "fr": "Tout"],
         "free.start": ["zh": "开始自由练习", "en": "Start practice", "fr": "Commencer"],
@@ -313,7 +297,11 @@ struct L {
         "new": ["zh": "新词", "en": "New", "fr": "Nouveaux"],
         "stat.due": ["zh": "待复习", "en": "Due", "fr": "À revoir"],
         "stat.learning": ["zh": "巩固中", "en": "Learning", "fr": "En cours"],
-        "stat.total": ["zh": "共 %d 张卡片：待复习 + 巩固中 + 已掌握 + 未学", "en": "%d cards: due + learning + mastered + unseen", "fr": "%d cartes : à revoir + en cours + maîtrisés + non vus"],
+        "stat.total": [
+            "zh": "共 %d 张卡片：待复习 + 巩固中 + 已掌握 + 未学",
+            "en": "%d cards: due + learning + mastered + unseen",
+            "fr": "%d cartes : à revoir + en cours + maîtrisés + non vus"
+        ],
         "today.new": ["zh": "今日新词", "en": "New today", "fr": "Nouveaux"],
         "badge.review": ["zh": "复习", "en": "Review", "fr": "Révision"],
         "badge.learning": ["zh": "巩固", "en": "Learning", "fr": "En cours"],
@@ -338,13 +326,21 @@ struct L {
         "curve.ebbinghaus": ["zh": "艾宾浩斯（不复习）", "en": "Ebbinghaus (no review)", "fr": "Ebbinghaus (sans révision)"],
         "curve.yours": ["zh": "你的记忆", "en": "Your memory", "fr": "Votre mémoire"],
         "forecast.title": ["zh": "复习计划", "en": "Review schedule", "fr": "Planning"],
-        "forecast.sub": ["zh": "今天的积压单独计数，柱状图为之后每天到期的词数", "en": "Today’s backlog on its own; bars show what comes due each day after", "fr": "Retard du jour à part ; barres : cartes à revoir ensuite"],
+        "forecast.sub": [
+            "zh": "今天的积压单独计数，柱状图为之后每天到期的词数",
+            "en": "Today’s backlog on its own; bars show what comes due each day after",
+            "fr": "Retard du jour à part ; barres : cartes à revoir ensuite"
+        ],
         "words.title": ["zh": "单词记忆", "en": "Word memory", "fr": "Mémoire par mot"],
         "words.sub": ["zh": "最需要复习的排在前面，点击查看单词的遗忘曲线", "en": "Sorted by current recall; click a word for its curve", "fr": "Triés par rétention ; cliquez pour la courbe"],
         "words.empty": ["zh": "还没有学过的词。点「开始今日学习」开始吧。", "en": "No words studied yet. Press Start today.", "fr": "Aucun mot étudié. Appuyez sur Commencer."],
         "due.now": ["zh": "现在复习", "en": "Due now", "fr": "À revoir"],
         "now": ["zh": "现在", "en": "now", "fr": "maint."],
-        "word.sub": ["zh": "每次复习把记忆拉回 100%，曲线越来越平缓 = 记得越来越牢。圆点颜色是当次的记忆程度。", "en": "Each review resets recall to 100%; flatter curves mean stronger memory. Dot colour shows your rating.", "fr": "Chaque révision remet à 100 % ; plus la courbe est plate, plus la mémoire est solide."],
+        "word.sub": [
+            "zh": "每次复习把记忆拉回 100%，曲线越来越平缓 = 记得越来越牢。圆点颜色是当次的记忆程度。",
+            "en": "Each review resets recall to 100%; flatter curves mean stronger memory. Dot colour shows your rating.",
+            "fr": "Chaque révision remet à 100 % ; plus la courbe est plate, plus la mémoire est solide."
+        ],
         "word.retention": ["zh": "当前记忆", "en": "Recall now", "fr": "Rétention"],
         "word.stability": ["zh": "记忆强度", "en": "Stability", "fr": "Stabilité"],
         "word.reviews": ["zh": "复习次数", "en": "Reviews", "fr": "Révisions"],
@@ -385,6 +381,8 @@ struct L {
         "update.err.download": ["zh": "更新下载失败，请稍后再试", "en": "Download failed, try again later", "fr": "Échec du téléchargement"],
         "update.err.signature": ["zh": "更新包签名校验失败，已取消安装", "en": "Update signature check failed; not installed", "fr": "Signature invalide, installation annulée"],
         "update.err.location": ["zh": "请先把 MyVocab 拖进「应用程序」文件夹再更新", "en": "Move MyVocab to Applications first", "fr": "Déplacez MyVocab dans Applications"],
+        "err.save": ["zh": "保存失败，请重试：", "en": "Save failed, please retry: ", "fr": "Échec de l’enregistrement : "],
+        "err.speak": ["zh": "朗读失败：", "en": "Speech failed: ", "fr": "Échec de la lecture : "],
         "home.title": ["zh": "词库", "en": "Decks", "fr": "Paquets"],
         "home.subtitle": ["zh": "法语词汇与记忆", "en": "French words, remembered", "fr": "Le français, mot à mot"],
         "builtin": ["zh": "内置", "en": "Built-in", "fr": "Intégré"],
@@ -394,9 +392,11 @@ struct L {
         "import": ["zh": "导入词库", "en": "Import deck", "fr": "Importer"],
         "import.desc": ["zh": "Anki .apkg · CSV · TXT", "en": "Anki .apkg · CSV · TXT", "fr": "Anki .apkg · CSV · TXT"],
         "import.failed": ["zh": "导入失败", "en": "Import failed", "fr": "Échec de l’importation"],
-        "err.anki21b": ["zh": "这是新版 Anki 格式。请在 Anki 导出时勾选「支持旧版 Anki」后再导入。",
-                        "en": "This is the newer Anki format. Re-export with “Support older Anki versions” checked.",
-                        "fr": "Format Anki récent. Réexportez en cochant « Prise en charge des anciennes versions »."],
+        "err.anki21b": [
+            "zh": "这是新版 Anki 格式。请在 Anki 导出时勾选「支持旧版 Anki」后再导入。",
+            "en": "This is the newer Anki format. Re-export with “Support older Anki versions” checked.",
+            "fr": "Format Anki récent. Réexportez en cochant « Prise en charge des anciennes versions »."
+        ],
         "err.empty": ["zh": "没有找到卡片。", "en": "No cards found.", "fr": "Aucune carte trouvée."],
         "err.unreadable": ["zh": "无法读取这个文件。", "en": "Could not read this file.", "fr": "Fichier illisible."],
         "cards": ["zh": "张卡片", "en": "cards", "fr": "cartes"],
@@ -429,12 +429,18 @@ struct L {
         "back": ["zh": "词库", "en": "Decks", "fr": "Paquets"],
         "tap.reveal": ["zh": "点击显示答案", "en": "Click to reveal", "fr": "Cliquez pour révéler"],
         "tap.next": ["zh": "点击下一个", "en": "Click for next", "fr": "Cliquez pour le suivant"],
-        "keys.deck": ["zh": "空格 显示/下一个 · D 说明 · → 跳过 · S 朗读", "en": "Space reveal/next · D notes · → skip · S listen",
-                      "fr": "Espace révéler/suivant · D notes · → passer · S écouter"],
+        "keys.deck": [
+            "zh": "空格 显示/下一个 · D 说明 · → 跳过 · S 朗读",
+            "en": "Space reveal/next · D notes · → skip · S listen",
+            "fr": "Espace révéler/suivant · D notes · → passer · S écouter"
+        ],
         "details.show": ["zh": "展开说明", "en": "Show notes", "fr": "Voir les notes"],
         "details.hide": ["zh": "收起说明", "en": "Hide notes", "fr": "Masquer les notes"],
-        "keys": ["zh": "空格 显示/下一个 · → 跳过 · S 朗读", "en": "Space reveal/next · → skip · S listen",
-                 "fr": "Espace révéler/suivant · → passer · S écouter"],
+        "keys": [
+            "zh": "空格 显示/下一个 · → 跳过 · S 朗读",
+            "en": "Space reveal/next · → skip · S listen",
+            "fr": "Espace révéler/suivant · → passer · S écouter"
+        ],
         "seen": ["zh": "已看", "en": "seen", "fr": "vus"],
         "listen": ["zh": "朗读", "en": "Listen", "fr": "Écouter"],
         "accent.sage": ["zh": "鼠尾草", "en": "Sage", "fr": "Sauge"],

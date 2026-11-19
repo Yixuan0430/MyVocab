@@ -1,6 +1,5 @@
 import Foundation
 
-/// French cardinal numbers 0–9999 with spelling and broad IPA (syllables split by ".").
 enum FrenchNumbers {
     struct Entry { let word: String; let ipa: String }
 
@@ -12,7 +11,6 @@ enum FrenchNumbers {
         ("dix-neuf", "diz.nœf"),
     ]
 
-    // tens 20…60: word, alone, before "et", before a hyphenated unit
     private static let tens: [Int: (String, String, String, String)] = [
         20: ("vingt", "vɛ̃", "vɛ̃.te", "vɛ̃t"),
         30: ("trente", "tʁɑ̃t", "tʁɑ̃.te", "tʁɑ̃t"),
@@ -21,7 +19,6 @@ enum FrenchNumbers {
         60: ("soixante", "swa.sɑ̃t", "swa.sɑ̃.te", "swa.sɑ̃t"),
     ]
 
-    // multiplier before "cent" / "mille" (pre-consonant forms)
     private static let multiplier = ["", "", "dø", "tʁwa", "katʁ", "sɛ̃k", "si", "sɛt", "ɥi", "nœf"]
 
     static func entry(_ n: Int) -> Entry {
@@ -67,7 +64,6 @@ enum FrenchNumbers {
             if n == 71 { return Entry(word: "soixante et onze", ipa: "swa.sɑ̃.te.ɔ̃z") }
             return Entry(word: "soixante-\(teen.0)", ipa: "swa.sɑ̃t.\(teen.1)")
         }
-        // 80–99
         if n == 80 { return Entry(word: "quatre-vingts", ipa: "ka.tʁə.vɛ̃") }
         let rest = base[n - 80]
         return Entry(word: "quatre-vingt-\(rest.0)", ipa: "ka.tʁə.vɛ̃.\(rest.1)")
