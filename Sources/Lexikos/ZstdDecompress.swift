@@ -58,6 +58,42 @@ enum ZstdDecompress {
         guard lastResult == 0, totalWritten > 0 else { throw ImportError.unreadable }
     }
 
+    static func decompressData(_ data: Data, maxBytes: Int = 16 * 1024 * 1024) throws -> Data {
+        guard !data.isEmpty else { throw ImportError.unreadable }
+        if !isZstd(data) {
+            guard data.count <= maxBytes else { throw ImportError.unreadable }
+            return data
+        }
+        guard let stream = ZSTD_createDStream() else { throw ImportError.unreadable }
+        defer { ZSTD_freeDStream(stream) }
+        guard ZSTD_isError(ZSTD_initDStream(stream)) == 0 else { throw ImportError.unreadable }
+
+        let outCapacity = max(65536, ZSTD_DStreamOutSize())
+        var outBuffer = [UInt8](repeating: 0, count: outCapacity)
+        var output = Data()
+        var lastResult: Int = 1
+        try data.withUnsafeBytes { rawIn in
+            guard let inBase = rawIn.baseAddress else { throw ImportError.unreadable }
+            var inBuf = ZSTD_inBuffer(src: inBase, size: rawIn.count, pos: 0)
+            while inBuf.pos < inBuf.size {
+                let produced = try outBuffer.withUnsafeMutableBytes { rawOut -> Int in
+                    guard let outBase = rawOut.baseAddress else { throw ImportError.unreadable }
+                    var outBuf = ZSTD_outBuffer(dst: outBase, size: outCapacity, pos: 0)
+                    let code = ZSTD_decompressStream(stream, &outBuf, &inBuf)
+                    guard ZSTD_isError(code) == 0 else { throw ImportError.unreadable }
+                    lastResult = code
+                    return outBuf.pos
+                }
+                if produced > 0 {
+                    guard output.count + produced <= maxBytes else { throw ImportError.unreadable }
+                    output.append(contentsOf: outBuffer.prefix(produced))
+                }
+            }
+        }
+        guard lastResult == 0, !output.isEmpty else { throw ImportError.unreadable }
+        return output
+    }
+
     static func compress(_ data: Data) throws -> Data {
         let bound = ZSTD_compressBound(data.count)
         guard ZSTD_isError(bound) == 0 else { throw ImportError.unreadable }

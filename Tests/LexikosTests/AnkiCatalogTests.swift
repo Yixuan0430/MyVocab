@@ -97,7 +97,7 @@ final class AnkiCatalogTests: XCTestCase {
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
 
-        let client = AnkiWebClient(cacheDir: cacheDir, fetcher: { req in
+        let client = AnkiWebClient(cacheDir: cacheDir, seed: nil, fetcher: { req in
             counter.calls += 1
             let status = counter.calls == 1 ? 200 : 429
             let resp = HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
@@ -110,14 +110,44 @@ final class AnkiCatalogTests: XCTestCase {
         XCTAssertEqual(first.decks.count, 1)
         XCTAssertEqual(counter.calls, 1)
 
-        let cached = try await client.listDecks(query: "french", now: t0.addingTimeInterval(60))
+        let cached = try await client.listDecks(query: "french", now: t0.addingTimeInterval(3600))
         XCTAssertFalse(cached.fromStaleCache)
         XCTAssertEqual(counter.calls, 1)
 
-        let stale = try await client.listDecks(query: "french", now: t0.addingTimeInterval(1000))
+        let stale = try await client.listDecks(query: "french", now: t0.addingTimeInterval(90_000))
         XCTAssertTrue(stale.fromStaleCache)
         XCTAssertEqual(stale.decks.first?.id, 123)
         XCTAssertEqual(counter.calls, 2)
+    }
+
+    func testBundledSeedCoversAllTenLanguagesAndAvoidsRateLimit() async throws {
+        let seed = try XCTUnwrap(AnkiCatalogSeed.bundled)
+        XCTAssertEqual(Set(seed.availableLanguages), Set(CatalogLanguage.allCases.map(\.searchQuery)))
+        var total = 0
+        for lang in CatalogLanguage.allCases {
+            let list = try XCTUnwrap(seed.decks(for: lang.searchQuery))
+            XCTAssertGreaterThan(list.count, 50)
+            total += list.count
+        }
+        XCTAssertGreaterThan(total, 10_000)
+
+        final class Counter: @unchecked Sendable { var calls = 0 }
+        let counter = Counter()
+        let client = AnkiWebClient(cacheDir: nil, seed: seed, fetcher: { req in
+            counter.calls += 1
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 429, httpVersion: nil, headerFields: nil)!
+            return (Data("Please log in to perform more searches.".utf8), resp)
+        })
+
+        let initial = try await client.listDecks(query: "french")
+        XCTAssertFalse(initial.fromStaleCache)
+        XCTAssertGreaterThan(initial.decks.count, 500)
+        XCTAssertEqual(counter.calls, 0)
+
+        let refreshed = try await client.listDecks(query: "french", forceRefresh: true)
+        XCTAssertTrue(refreshed.fromStaleCache)
+        XCTAssertEqual(refreshed.decks.count, initial.decks.count)
+        XCTAssertEqual(counter.calls, 1)
     }
 
     func testDownloadDeckRefreshesExpiredKeyOn403AndRejectsNonZip() async throws {

@@ -369,9 +369,9 @@ struct CatalogL {
         "loading": ["zh": "正在从 AnkiWeb 获取词库列表…", "en": "Loading decks from AnkiWeb…", "fr": "Chargement depuis AnkiWeb…"],
         "loading.detail": ["zh": "正在加载词库详情与示例卡片…", "en": "Loading deck details & sample cards…", "fr": "Chargement des détails et exemples…"],
         "stale.banner": [
-            "zh": "AnkiWeb 访问频率受限，当前显示本地缓存",
-            "en": "AnkiWeb rate-limited; showing cached results",
-            "fr": "Limite AnkiWeb atteinte ; affichage du cache"
+            "zh": "AnkiWeb 匿名搜索暂受限，当前已展示内置/缓存词库索引（点击词库可实时查看详情与下载）",
+            "en": "AnkiWeb anonymous search is rate-limited; showing bundled/cached index (details & download remain live)",
+            "fr": "Recherche anonyme limitée ; index intégré affiché (détails et téléchargement en direct)"
         ],
         "empty.level": [
             "zh": "该阶段下暂无匹配的词库，可切换到「全部」或尝试搜索全站",
@@ -414,9 +414,9 @@ struct CatalogL {
         "err.notFound": ["zh": "未找到该 AnkiWeb 词库（可能已下架）", "en": "Deck not found on AnkiWeb", "fr": "Paquet introuvable sur AnkiWeb"],
         "err.accessDenied": ["zh": "该词库暂不允许公开下载", "en": "Access to this deck is restricted", "fr": "Accès restreint à ce paquet"],
         "err.rateLimited": [
-            "zh": "AnkiWeb 暂时限流，请稍等几秒后重试",
-            "en": "AnkiWeb rate limit reached. Please retry in a few seconds.",
-            "fr": "Limite AnkiWeb atteinte. Réessayez dans quelques secondes."
+            "zh": "AnkiWeb 匿名全站搜索暂时受限；可先浏览各语言分类，或直接粘贴 AnkiWeb 链接导入",
+            "en": "AnkiWeb anonymous search is rate-limited; browse language categories or paste a deck link directly",
+            "fr": "Recherche anonyme limitée sur AnkiWeb ; parcourez les langues ou collez un lien direct"
         ],
         "err.network": ["zh": "网络连接失败，请检查网络后重试", "en": "Network error. Check connection and retry.", "fr": "Erreur réseau. Vérifiez la connexion."],
         "err.badResponse": ["zh": "AnkiWeb 返回了意外的数据格式", "en": "Unexpected response from AnkiWeb", "fr": "Réponse inattendue d’AnkiWeb"],

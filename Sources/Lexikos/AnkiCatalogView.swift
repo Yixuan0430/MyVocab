@@ -283,9 +283,18 @@ struct AnkiCatalogView: View {
                 VStack(spacing: 12) {
                     Spacer(minLength: 60)
                     Image(systemName: "wifi.exclamationmark").font(.system(size: 26, weight: .light)).foregroundStyle(Color.warn)
-                    Text(listError).font(.system(size: 13)).foregroundStyle(Color.ink).multilineTextAlignment(.center)
-                    Button(cl["action.retry"]) { loadCatalog(forceRefresh: true) }
-                        .buttonStyle(.capsule(.secondary, accent))
+                    Text(listError).font(.system(size: 13)).foregroundStyle(Color.ink).multilineTextAlignment(.center).frame(maxWidth: 340)
+                    HStack(spacing: 10) {
+                        if remoteQuery != nil {
+                            Button(cl["search.clearRemote"]) {
+                                remoteQuery = nil
+                                loadCatalog(forceRefresh: false)
+                            }
+                            .buttonStyle(.capsule(.primary, accent))
+                        }
+                        Button(cl["action.retry"]) { loadCatalog(forceRefresh: true) }
+                            .buttonStyle(.capsule(.secondary, accent))
+                    }
                     Spacer(minLength: 60)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

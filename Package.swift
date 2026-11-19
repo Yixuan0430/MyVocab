@@ -16,7 +16,8 @@ let package = Package(
                 "ZIPFoundation",
                 .product(name: "libzstd", package: "zstd"),
             ],
-            exclude: ["iOS"]
+            exclude: ["iOS"],
+            resources: [.process("Resources")]
         ),
         .testTarget(name: "LexikosTests", dependencies: ["Lexikos"]),
     ]

@@ -61,23 +61,26 @@ final class AnkiWebClient: @unchecked Sendable {
     }
 
     static let shared = AnkiWebClient()
-    private static let listTTL: TimeInterval = 900
+    private static let listTTL: TimeInterval = 86_400
     private static let detailTTL: TimeInterval = 600
     private static let maxDownloadBytes: Int64 = 512 * 1024 * 1024
 
     private let fetcher: DataFetcher
     private let downloader: FileDownloader
     private let cacheDir: URL?
+    private let seed: AnkiCatalogSeed?
     private let lock = NSLock()
     private var memoryLists: [String: CachedList] = [:]
     private var memoryDetails: [Int64: CachedDetail] = [:]
 
     init(
         cacheDir: URL? = AnkiWebClient.defaultCacheDir(),
+        seed: AnkiCatalogSeed? = AnkiCatalogSeed.bundled,
         fetcher: DataFetcher? = nil,
         downloader: FileDownloader? = nil
     ) {
         self.cacheDir = cacheDir
+        self.seed = seed
         self.fetcher = fetcher ?? { try await Self.liveFetch($0) }
         self.downloader = downloader ?? { try await Self.liveDownload($0, onProgress: $1) }
     }
@@ -107,6 +110,17 @@ final class AnkiWebClient: @unchecked Sendable {
         if !forceRefresh, let cached, now.timeIntervalSince(cached.fetchedAt) < Self.listTTL {
             return ListResult(decks: cached.decks, fromStaleCache: false, fetchedAt: cached.fetchedAt)
         }
+        let seeded = seed?.decks(for: normalized)
+        if !forceRefresh, cached == nil, let seeded, let seedDate = seed?.fetchedAt {
+            return ListResult(decks: seeded, fromStaleCache: false, fetchedAt: seedDate)
+        }
+        func fallback() -> ListResult? {
+            if let cached { return ListResult(decks: cached.decks, fromStaleCache: true, fetchedAt: cached.fetchedAt) }
+            if let seeded, let seedDate = seed?.fetchedAt {
+                return ListResult(decks: seeded, fromStaleCache: true, fetchedAt: seedDate)
+            }
+            return nil
+        }
         var components = URLComponents(string: "https://ankiweb.net/svc/shared/list-decks")!
         if !normalized.isEmpty {
             components.queryItems = [URLQueryItem(name: "search", value: normalized)]
@@ -115,7 +129,7 @@ final class AnkiWebClient: @unchecked Sendable {
         do {
             let (data, response) = try await fetcher(Self.request(url))
             if response.statusCode == 429 {
-                if let cached { return ListResult(decks: cached.decks, fromStaleCache: true, fetchedAt: cached.fetchedAt) }
+                if let fb = fallback() { return fb }
                 throw AnkiWebError.rateLimited
             }
             guard (200...299).contains(response.statusCode) else { throw AnkiWebError.http(response.statusCode) }
@@ -123,14 +137,12 @@ final class AnkiWebClient: @unchecked Sendable {
             saveCachedList(CachedList(fetchedAt: now, decks: decks), key: normalized)
             return ListResult(decks: decks, fromStaleCache: false, fetchedAt: now)
         } catch let error as AnkiWebError {
-            if error == .rateLimited, let cached {
-                return ListResult(decks: cached.decks, fromStaleCache: true, fetchedAt: cached.fetchedAt)
-            }
+            if error == .rateLimited, let fb = fallback() { return fb }
             throw error
         } catch is CancellationError {
             throw AnkiWebError.cancelled
         } catch {
-            if let cached { return ListResult(decks: cached.decks, fromStaleCache: true, fetchedAt: cached.fetchedAt) }
+            if let fb = fallback() { return fb }
             throw AnkiWebError.network
         }
     }
@@ -436,56 +448,5 @@ final class AnkiWebClient: @unchecked Sendable {
             if !value.isEmpty { out.append(.init(name: name, value: value)) }
         }
         return out.isEmpty ? nil : AnkiWebSampleNote(fields: out)
-    }
-}
-
-enum ProtoWire {
-    enum Value { case varint(UInt64), bytes(Data), fixed64(UInt64), fixed32(UInt32) }
-    struct Field { let number: Int; let value: Value }
-
-    static func fields(in data: Data) throws -> [Field] {
-        let bytes = [UInt8](data)
-        var i = 0
-        var out: [Field] = []
-        func readVarint() throws -> UInt64 {
-            var result: UInt64 = 0
-            for shift in stride(from: 0, through: 63, by: 7) {
-                guard i < bytes.count else { throw AnkiWebError.badResponse }
-                let byte = bytes[i]
-                i += 1
-                guard shift < 63 || byte <= 1 else { throw AnkiWebError.badResponse }
-                result |= UInt64(byte & 0x7F) << shift
-                if byte < 0x80 { return result }
-            }
-            throw AnkiWebError.badResponse
-        }
-        while i < bytes.count {
-            let key = try readVarint()
-            let number = Int(key >> 3)
-            guard number > 0 else { throw AnkiWebError.badResponse }
-            switch key & 7 {
-            case 0:
-                out.append(Field(number: number, value: .varint(try readVarint())))
-            case 1:
-                guard bytes.count - i >= 8 else { throw AnkiWebError.badResponse }
-                let raw = bytes[i..<i + 8].enumerated().reduce(UInt64(0)) { $0 | (UInt64($1.element) << ($1.offset * 8)) }
-                i += 8
-                out.append(Field(number: number, value: .fixed64(raw)))
-            case 2:
-                guard let len = Int(exactly: try readVarint()), len >= 0, len <= bytes.count - i else {
-                    throw AnkiWebError.badResponse
-                }
-                out.append(Field(number: number, value: .bytes(Data(bytes[i..<i + len]))))
-                i += len
-            case 5:
-                guard bytes.count - i >= 4 else { throw AnkiWebError.badResponse }
-                let raw = bytes[i..<i + 4].enumerated().reduce(UInt32(0)) { $0 | (UInt32($1.element) << ($1.offset * 8)) }
-                i += 4
-                out.append(Field(number: number, value: .fixed32(raw)))
-            default:
-                throw AnkiWebError.badResponse
-            }
-        }
-        return out
     }
 }
