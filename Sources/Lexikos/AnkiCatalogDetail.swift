@@ -383,7 +383,9 @@ struct AnkiCatalogDetailPanel: View {
     }
 
     @ViewBuilder private func sampleAudioButton(filename: String, url: URL?) -> some View {
-        if let url, filename.lowercased().hasSuffix(".mp3") {
+        let lower = filename.lowercased()
+        let playable = lower.hasSuffix(".mp3") || lower.hasSuffix(".wav") || lower.hasSuffix(".m4a") || lower.hasSuffix(".aac")
+        if let url, playable {
             let playing = audioPlayer.playingURL == url
             Button { audioPlayer.toggle(url) } label: {
                 HStack(spacing: 5) {

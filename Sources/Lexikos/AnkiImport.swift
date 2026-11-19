@@ -11,6 +11,7 @@ enum AnkiImport {
         var hint: Int?
         var examples: [(fr: Int, en: Int?)] = []
         var extras: [Int] = []
+        var isCloze = false
     }
 
     static func cards(db: OpaquePointer?) -> [Card]? {
@@ -20,16 +21,26 @@ enum AnkiImport {
         var out: [Card] = []
         for (mid, flds) in rows(db, "SELECT mid, flds FROM notes ORDER BY id") {
             guard let mid = Int64(mid), let type = types[mid] else { continue }
-            let values = flds.components(separatedBy: "\u{1F}").map(Importer.clean)
             let map = maps[mid] ?? fieldMap(type)
             maps[mid] = map
+            let rawFields = flds.components(separatedBy: "\u{1F}")
+            let values = rawFields.map { Importer.clean($0, expandCloze: !map.isCloze) }
             if let card = card(values, type, map) { out.append(card) }
         }
         return out
     }
 
-    private static func usable(_ v: String) -> Bool {
-        !v.isEmpty && v.range(of: #"^[\d\s.,#-]+$"#, options: .regularExpression) == nil
+    private static let uuidRegex = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
+    private static let clozePattern = #"\{\{c\d+::([^:}]+)(?:::([^}]*))?\}\}"#
+
+    private static func usable(_ v: String, allowNumeric: Bool = false) -> Bool {
+        let trimmed = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if trimmed.range(of: #"^https?://\S+$"#, options: [.regularExpression, .caseInsensitive]) != nil { return false }
+        if trimmed.range(of: uuidRegex, options: .regularExpression) != nil { return false }
+        if trimmed.range(of: #"^[\p{P}\p{S}\s]+$"#, options: .regularExpression) != nil { return false }
+        if !allowNumeric && trimmed.range(of: #"^[\d\s.,#|/-]+$"#, options: .regularExpression) != nil { return false }
+        return true
     }
 
     private static func uniqueOrdered(_ items: [Int]) -> [Int] {
@@ -38,19 +49,25 @@ enum AnkiImport {
     }
 
     private static func card(_ v: [String], _ t: NoteType, _ m: FieldMap) -> Card? {
-        func val(_ i: Int) -> String? { i < v.count && usable(v[i]) ? v[i] : nil }
+        if m.isCloze, let clozeCard = makeClozeCard(v, t, m) {
+            return clozeCard
+        }
+        let plain = m.isCloze ? v.map { expandClozeText($0) } : v
+        func val(_ i: Int, allowNumeric: Bool = false) -> String? {
+            i < plain.count && usable(plain[i], allowNumeric: allowNumeric) ? plain[i] : nil
+        }
         var frontIndices: [Int] = m.front.filter { val($0) != nil }
-        if frontIndices.isEmpty, let fallback = v.indices.first(where: { val($0) != nil }) {
+        if frontIndices.isEmpty, let fallback = plain.indices.first(where: { val($0) != nil }) {
             frontIndices = [fallback]
         }
-        var front = frontIndices.compactMap(val).joined(separator: " ")
+        var front = frontIndices.compactMap { val($0) }.joined(separator: " ")
         guard !front.isEmpty else { return nil }
         let usedFront = Set(frontIndices)
         if let tagIdx = m.tag, !usedFront.contains(tagIdx), let tag = val(tagIdx) { front += " (\(tag))" }
 
-        var answer = m.answer.filter { !usedFront.contains($0) }.compactMap(val)
+        var answer = m.answer.filter { !usedFront.contains($0) }.compactMap { val($0, allowNumeric: true) }
         var extras = m.extras.filter { !usedFront.contains($0) && val($0) != nil }
-        if answer.isEmpty, let firstExtra = extras.first, let text = val(firstExtra) {
+        if answer.isEmpty, let firstExtra = extras.first, let text = val(firstExtra, allowNumeric: true) {
             answer = [text]
             extras.removeFirst()
         }
@@ -73,60 +90,171 @@ enum AnkiImport {
         return Card(front: front, back: lines.joined(separator: "\n"), hint: hint)
     }
 
-    private static func has(_ name: String, _ words: [String]) -> Bool { words.contains { name.contains($0) } }
-    private static let skipWords = ["audio", "sound", "image", "picture", "img", "photo", "rank", "freq", "index", "s.l", "sl no", "id"]
-    private static let tagWords = ["part of speech", "pos", "gender", "word type", "wordtype", "class", "genre", "nature"]
-    private static let hintWords = ["ipa", "phonetic", "pronunciation", "prononciation", "transcription"]
-    private static let sentenceWords = ["sentence", "example", "exemple", "phrase", "usage example", "context"]
-    private static let meaningWords = [
-        "meaning", "definition", "english", "translation", "traduction", "sens", "signification",
-        "back", "answer", "verso", "释义", "中文", "翻译", "意思"
+    private static func makeClozeCard(_ v: [String], _ t: NoteType, _ m: FieldMap) -> Card? {
+        guard let regex = try? NSRegularExpression(pattern: clozePattern) else { return nil }
+        let clozeIdx = m.front.first { idx in
+            idx < v.count && regex.firstMatch(in: v[idx], range: NSRange(location: 0, length: (v[idx] as NSString).length)) != nil
+        }
+        guard let idx = clozeIdx else { return nil }
+        let source = v[idx]
+        let ns = source as NSString
+        let matches = regex.matches(in: source, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return nil }
+
+        var answers: [String] = []
+        let masked = NSMutableString(string: source)
+        for match in matches.reversed() {
+            let ans = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !ans.isEmpty { answers.insert(ans, at: 0) }
+            let hintText = match.range(at: 2).location != NSNotFound
+                ? ns.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                : ""
+            masked.replaceCharacters(in: match.range, with: hintText.isEmpty ? "[…]" : "[\(hintText)]")
+        }
+        let front = (masked as String).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !front.isEmpty, !answers.isEmpty else { return nil }
+
+        var lines: [String] = [answers.joined(separator: " · ")]
+        let fullSentence = expandClozeText(source)
+        if fullSentence != lines[0] && !fullSentence.isEmpty {
+            lines.append("Example:")
+            lines.append(fullSentence)
+        }
+        for extraIdx in (m.answer + m.extras) where extraIdx != idx && extraIdx < v.count {
+            let text = expandClozeText(v[extraIdx])
+            guard usable(text) else { continue }
+            let heading = t.fields[extraIdx].trimmingCharacters(in: .whitespacesAndNewlines)
+            if heading.contains(where: \.isLetter) { lines.append("\(heading):") }
+            lines.append(text)
+        }
+        let hint = m.hint.flatMap { $0 != idx && $0 < v.count && usable(v[$0]) ? expandClozeText(v[$0]) : nil } ?? ""
+        return Card(front: front, back: lines.joined(separator: "\n"), hint: hint)
+    }
+
+    private static func expandClozeText(_ text: String) -> String {
+        text.replacingOccurrences(of: clozePattern, with: "$1", options: .regularExpression)
+    }
+
+    static func fieldTokens(_ name: String) -> [String] {
+        let decamel = name.replacingOccurrences(of: "(?<=[a-z])(?=[A-Z])", with: " ", options: .regularExpression)
+        return decamel.lowercased()
+            .components(separatedBy: CharacterSet.letters.inverted)
+            .filter { !$0.isEmpty }
+    }
+
+    private static func matchesAny(_ name: String, tokens: Set<String>, phrases: [String]) -> Bool {
+        let split = fieldTokens(name)
+        if split.contains(where: { tokens.contains($0) }) { return true }
+        let joined = split.joined(separator: " ")
+        return phrases.contains { joined.contains($0) }
+    }
+
+    private static let skipTokens: Set<String> = [
+        "audio", "sound", "image", "images", "picture", "pictures", "img", "photo", "photos",
+        "rank", "freq", "frequency", "index", "id", "uid", "uuid", "guid", "link", "url",
+        "order", "sort", "sl", "diagram", "svg", "stroke", "copyright", "license", "source",
+        "wiktionary", "suborder", "totalorder"
     ]
+    private static let skipPhrases = ["sl no", "word audio", "sentence audio", "note id", "card id"]
+    private static let tagTokens: Set<String> = ["pos", "gender", "wordtype", "class", "genre", "nature", "level", "honorific"]
+    private static let tagPhrases = ["part of speech", "word type"]
+    private static let hintTokens: Set<String> = [
+        "ipa", "phonetic", "pronunciation", "prononciation", "transcription",
+        "reading", "kana", "furigana", "hiragana", "katakana", "romaji",
+        "pinyin", "zhuyin", "romanization", "pitch", "accent"
+    ]
+    private static let sentenceTokens: Set<String> = ["sentence", "sentences", "example", "examples", "exemple", "exemples", "phrase", "context", "sample"]
+    private static let sentencePhrases = ["usage example", "example sentence"]
+    private static let meaningTokens: Set<String> = [
+        "meaning", "meanings", "definition", "definitions", "def", "gloss",
+        "english", "eng", "translation", "translations", "traduction", "sens",
+        "signification", "back", "answer", "verso", "explain", "explanation",
+        "chinese", "zh", "cn", "释义", "中文", "翻译", "意思", "解释"
+    ]
+    private static let translationTokens: Set<String> = [
+        "translation", "translations", "english", "eng", "traduction",
+        "meaning", "meanings", "chinese", "zh", "cn", "翻译", "中文", "释义"
+    ]
+
+    private static func templateRefs(_ tmpl: String, names: [String]) -> [Int] {
+        let builtIns: Set<String> = ["frontside", "tags", "type", "deck", "subdeck", "card", "cardflag"]
+        return tmpl.matches(of: #/\{\{([^}]+)\}\}/#).compactMap { m in
+            let token = String(m.1).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let first = token.first, !"#/^!".contains(first) else { return nil }
+            let raw = token.split(separator: ":").last.map(String.init) ?? token
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !builtIns.contains(name) else { return nil }
+            return names.firstIndex(of: name)
+        }
+    }
+
+    private static func skipIndices(for fields: [String]) -> Set<Int> {
+        Set(fields.indices.filter { idx in
+            let raw = fields[idx].lowercased().trimmingCharacters(in: .whitespaces)
+            if raw == "no" || raw == "#" || raw == "s.l" { return true }
+            let isSkip = matchesAny(fields[idx], tokens: skipTokens, phrases: skipPhrases)
+            let isSentence = matchesAny(fields[idx], tokens: sentenceTokens, phrases: sentencePhrases)
+            return isSkip && !isSentence
+        })
+    }
 
     static func fieldMap(_ t: NoteType) -> FieldMap {
         let names = t.fields.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
-        let builtIns: Set<String> = ["frontside", "tags", "type", "deck", "subdeck", "card", "cardflag"]
-        func refs(_ tmpl: String) -> [Int] {
-            tmpl.matches(of: #/\{\{([^}]+)\}\}/#).compactMap { m in
-                let token = String(m.1).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let first = token.first, !"#/^!".contains(first) else { return nil }
-                let raw = token.split(separator: ":").last.map(String.init) ?? token
-                let name = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                guard !builtIns.contains(name) else { return nil }
-                return names.firstIndex(of: name)
-            }
-        }
-        let skip = Set(names.indices.filter {
-            names[$0] == "no" || names[$0] == "#" || has(names[$0], skipWords) && !has(names[$0], sentenceWords)
-        })
+        let skip = skipIndices(for: t.fields)
         var m = FieldMap()
-        let q = refs(t.qfmt).filter { !skip.contains($0) }
-        m.front = q.isEmpty ? (t.fields.isEmpty ? [] : [0]) : uniqueOrdered(q)
+        m.isCloze = t.qfmt.range(of: #"\{\{[^}]*cloze:"#, options: [.regularExpression, .caseInsensitive]) != nil
+        let q = templateRefs(t.qfmt, names: names).filter { !skip.contains($0) }
+        if q.isEmpty {
+            let firstNonSkip = t.fields.indices.first { !skip.contains($0) }
+            m.front = firstNonSkip.map { [$0] } ?? (t.fields.isEmpty ? [] : [0])
+        } else {
+            m.front = uniqueOrdered(q)
+        }
 
-        var rest = refs(t.afmt).filter { !m.front.contains($0) && !skip.contains($0) }
-        if rest.isEmpty { rest = names.indices.filter { !m.front.contains($0) && !skip.contains($0) } }
+        var rest = templateRefs(t.afmt, names: names).filter { !m.front.contains($0) && !skip.contains($0) }
+        if rest.isEmpty { rest = t.fields.indices.filter { !m.front.contains($0) && !skip.contains($0) } }
         rest = uniqueOrdered(rest).sorted()
 
         var used = Set<Int>()
-        for i in rest where has(names[i], tagWords) && m.tag == nil { m.tag = i; used.insert(i) }
-        for i in rest where has(names[i], hintWords) && m.hint == nil { m.hint = i; used.insert(i) }
-        for i in rest where !used.contains(i) && has(names[i], sentenceWords) {
+        for i in rest where matchesAny(t.fields[i], tokens: tagTokens, phrases: tagPhrases) && m.tag == nil {
+            m.tag = i; used.insert(i)
+        }
+        for i in rest where matchesAny(t.fields[i], tokens: hintTokens, phrases: [])
+            && !matchesAny(t.fields[i], tokens: sentenceTokens, phrases: sentencePhrases)
+            && m.hint == nil {
+            m.hint = i; used.insert(i)
+        }
+        for i in rest where !used.contains(i)
+            && matchesAny(t.fields[i], tokens: sentenceTokens, phrases: sentencePhrases)
+            && !matchesAny(t.fields[i], tokens: translationTokens, phrases: []) {
             used.insert(i)
-            let next = rest.first {
-                $0 > i && !used.contains($0) && has(names[$0], ["translation", "english", "traduction", "meaning"])
+            let next = rest.first { j in
+                j > i && !used.contains(j) && matchesAny(t.fields[j], tokens: translationTokens, phrases: [])
             }
-            if let n = next, !has(names[n], sentenceWords) || has(names[n], ["translation", "english"]) {
+            if let n = next {
                 used.insert(n)
                 m.examples.append((i, n))
             } else {
                 m.examples.append((i, nil))
             }
         }
-        let meanings = rest.filter { !used.contains($0) && has(names[$0], meaningWords) }
+        let meanings = rest.filter { !used.contains($0) && matchesAny(t.fields[$0], tokens: meaningTokens, phrases: []) }
         m.answer = meanings.isEmpty ? Array(rest.filter { !used.contains($0) }.prefix(1)) : meanings
         used.formUnion(m.answer)
         m.extras = rest.filter { !used.contains($0) }
         return m
+    }
+
+    private static func pickTemplate(_ templates: [(String, String)], fields: [String]) -> (String, String) {
+        guard !templates.isEmpty else { return ("", "") }
+        let names = fields.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
+        let skip = skipIndices(for: fields)
+        if let textFirst = templates.first(where: { tmpl in
+            !templateRefs(tmpl.0, names: names).filter({ !skip.contains($0) }).isEmpty
+        }) {
+            return textFirst
+        }
+        return templates[0]
     }
 
     static func noteTypes(_ db: OpaquePointer?) -> [Int64: NoteType] {
@@ -136,33 +264,39 @@ enum AnkiImport {
             for (id, m) in models {
                 guard let numericID = Int64(id) else { continue }
                 let flds = (m["flds"] as? [[String: Any]] ?? []).sorted { ($0["ord"] as? Int ?? 0) < ($1["ord"] as? Int ?? 0) }
-                let tmpl = (m["tmpls"] as? [[String: Any]])?.first
-                out[numericID] = NoteType(fields: flds.compactMap { $0["name"] as? String },
-                                          qfmt: tmpl?["qfmt"] as? String ?? "",
-                                          afmt: tmpl?["afmt"] as? String ?? "")
+                let fieldNames = flds.compactMap { $0["name"] as? String }
+                let tmpls = (m["tmpls"] as? [[String: Any]] ?? [])
+                    .sorted { ($0["ord"] as? Int ?? 0) < ($1["ord"] as? Int ?? 0) }
+                    .map { ($0["qfmt"] as? String ?? "", $0["afmt"] as? String ?? "") }
+                let chosen = pickTemplate(tmpls, fields: fieldNames)
+                out[numericID] = NoteType(fields: fieldNames, qfmt: chosen.0, afmt: chosen.1)
             }
         }
         if out.isEmpty {
             for (ntid, _) in rows(db, "SELECT id, name FROM notetypes") {
                 guard let id = Int64(ntid) else { continue }
-                let fields = rows(db, "SELECT name, ord FROM fields WHERE ntid = ? ORDER BY ord", int64Param: id).map(\.0)
-                let (q, a) = templateFormats(db, id)
-                out[id] = NoteType(fields: fields, qfmt: q, afmt: a)
+                let fieldNames = rows(db, "SELECT name, ord FROM fields WHERE ntid = ? ORDER BY ord", int64Param: id).map(\.0)
+                let chosen = pickTemplate(allTemplateFormats(db, id), fields: fieldNames)
+                out[id] = NoteType(fields: fieldNames, qfmt: chosen.0, afmt: chosen.1)
             }
         }
         return out
     }
 
-    private static func templateFormats(_ db: OpaquePointer?, _ ntid: Int64) -> (String, String) {
+    private static func allTemplateFormats(_ db: OpaquePointer?, _ ntid: Int64) -> [(String, String)] {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT config FROM templates WHERE ntid = ? ORDER BY ord LIMIT 1", -1, &stmt, nil) == SQLITE_OK else {
-            return ("", "")
+        guard sqlite3_prepare_v2(db, "SELECT config FROM templates WHERE ntid = ? ORDER BY ord", -1, &stmt, nil) == SQLITE_OK else {
+            return []
         }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, ntid)
-        guard sqlite3_step(stmt) == SQLITE_ROW, let p = sqlite3_column_blob(stmt, 0) else { return ("", "") }
-        let bytes = Array(UnsafeBufferPointer(start: p.assumingMemoryBound(to: UInt8.self), count: Int(sqlite3_column_bytes(stmt, 0))))
-        return decodeFormats(bytes)
+        var out: [(String, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let p = sqlite3_column_blob(stmt, 0) else { continue }
+            let bytes = Array(UnsafeBufferPointer(start: p.assumingMemoryBound(to: UInt8.self), count: Int(sqlite3_column_bytes(stmt, 0))))
+            out.append(decodeFormats(bytes))
+        }
+        return out
     }
 
     static func decodeFormats(_ bytes: [UInt8]) -> (String, String) {

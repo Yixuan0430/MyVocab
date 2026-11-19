@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import SQLite3
 import ZIPFoundation
 
@@ -11,6 +12,37 @@ struct Deck: Codable, Identifiable, Hashable {
     var language: String?
 
     var glyph: String { name.first(where: \.isLetter).map { String($0).uppercased() } ?? "#" }
+
+    var inferredSpeechLanguage: String {
+        if let explicit = language?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
+            return explicit
+        }
+        if let byName = CatalogLanguage.infer(from: name) {
+            return byName.speechCode
+        }
+        return Self.detectLanguageFromCards(cards) ?? "fr-FR"
+    }
+
+    static func detectLanguageFromCards(_ cards: [Card]) -> String? {
+        let sample = cards.prefix(24).map(\.front).filter { !$0.isEmpty }
+        guard !sample.isEmpty else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        var votes: [NLLanguage: Int] = [:]
+        for text in sample {
+            recognizer.reset()
+            recognizer.processString(text)
+            if let dom = recognizer.dominantLanguage, dom != .undetermined {
+                votes[dom, default: 0] += 1
+            }
+        }
+        guard let top = votes.max(by: { $0.value < $1.value })?.key else { return nil }
+        let map: [NLLanguage: String] = [
+            .french: "fr-FR", .english: "en-US", .japanese: "ja-JP", .german: "de-DE",
+            .spanish: "es-ES", .korean: "ko-KR", .simplifiedChinese: "zh-CN",
+            .traditionalChinese: "zh-TW", .russian: "ru-RU", .arabic: "ar-SA", .hebrew: "he-IL"
+        ]
+        return map[top] ?? top.rawValue
+    }
 }
 
 struct DeckDeletion: Codable { var deletedDeck: UUID }
@@ -56,7 +88,8 @@ enum ImportError: Error { case anki21b, empty, unreadable }
         let cards = url.pathExtension.lowercased() == "apkg" ? try Importer.anki(url) : try Importer.text(url)
         guard !cards.isEmpty else { throw ImportError.empty }
         let name = nameOverride ?? url.deletingPathExtension().lastPathComponent
-        let deck = Deck(name: name, cards: cards, language: language)
+        let resolvedLanguage = language ?? CatalogLanguage.infer(from: name)?.speechCode ?? Deck.detectLanguageFromCards(cards)
+        let deck = Deck(name: name, cards: cards, language: resolvedLanguage)
         try JSONEncoder().encode(deck).write(to: file(deck), options: .atomic)
         decks.append(deck)
         sortDecks()
@@ -68,13 +101,16 @@ enum ImportError: Error { case anki21b, empty, unreadable }
         if id != nil && existing == nil { throw ImportError.unreadable }
         let directory = dir
         let resolvedName = existing?.name ?? nameOverride ?? url.deletingPathExtension().lastPathComponent
-        let resolvedLanguage = language ?? existing?.language
+        let explicitLanguage = language ?? existing?.language
         let saved = try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let cards = url.pathExtension.lowercased() == "apkg" ? try Importer.anki(url) : try Importer.text(url)
             guard !cards.isEmpty else { throw ImportError.empty }
-            let result = Deck(id: existing?.id ?? UUID(), name: resolvedName, cards: cards, language: resolvedLanguage)
+            let finalLanguage = explicitLanguage
+                ?? CatalogLanguage.infer(from: resolvedName)?.speechCode
+                ?? Deck.detectLanguageFromCards(cards)
+            let result = Deck(id: existing?.id ?? UUID(), name: resolvedName, cards: cards, language: finalLanguage)
             try JSONEncoder().encode(result).write(to: directory.appendingPathComponent("\(result.id.uuidString).json"), options: .atomic)
             return result
         }.value
@@ -246,15 +282,21 @@ enum Importer {
 
     private static func cards(_ rows: [[String]]) -> [Card] {
         rows.compactMap { f in
-            let f = f.map(clean)
+            let f = f.map { clean($0) }
             guard f.count >= 2, !f[0].isEmpty, !f[1].isEmpty else { return nil }
             return Card(front: f[0], back: f[1], hint: f.count > 2 ? f[2] : "")
         }
     }
 
-    static func clean(_ s: String) -> String {
-        var t = s.replacingOccurrences(of: "<(style|script)[^>]*>[\\s\\S]*?</\\1>", with: "", options: [.regularExpression, .caseInsensitive])
-        t = t.replacingOccurrences(of: #"\{\{c\d+::([^:}]+)(?:::[^}]*)?\}\}"#, with: "$1", options: .regularExpression)
+    static func clean(_ s: String, expandCloze: Bool = true) -> String {
+        var t = s.replacingOccurrences(of: "<!--[\\s\\S]*?-->", with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: "<(style|script)[^>]*>[\\s\\S]*?</\\1>", with: "", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(of: "<rp[^>]*>[\\s\\S]*?</rp>", with: "", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(of: "<rt[^>]*>([\\s\\S]*?)</rt>", with: "($1)", options: [.regularExpression, .caseInsensitive])
+        if expandCloze {
+            t = t.replacingOccurrences(of: #"\{\{c\d+::([^:}]+)(?:::[^}]*)?\}\}"#, with: "$1", options: .regularExpression)
+        }
+        t = flattenTableCells(t)
         t = t.replacingOccurrences(of: "</t[dh]>\\s*<t[dh][^>]*>", with: " · ", options: [.regularExpression, .caseInsensitive])
         t = t.replacingOccurrences(
             of: "<br\\s*/?>|<hr[^>]*>|<div[^>]*>|</div>|</p>|</tr>|</li>|</h[1-6]>|</dt>|</dd>|</blockquote>",
@@ -265,13 +307,32 @@ enum Importer {
         t = decodeHTMLEntities(t)
         return t.split(separator: "\n")
             .map { line in
-                line.replacingOccurrences(of: "[ \\t\\u{00A0}]+", with: " ", options: .regularExpression)
-                    .replacingOccurrences(of: "(?:\\s*·\\s*){2,}", with: " · ", options: .regularExpression)
+                line.replacingOccurrences(of: "(?:\\s*·\\s*)+", with: " · ", options: .regularExpression)
+                    .replacingOccurrences(of: "[ \\t\\u{00A0}]+", with: " ", options: .regularExpression)
                     .replacingOccurrences(of: "^(?:·\\s*)+|(?:\\s*·)+$", with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+
+    private static func flattenTableCells(_ html: String) -> String {
+        guard html.range(of: "<t[dh]\\b", options: [.regularExpression, .caseInsensitive]) != nil,
+              let regex = try? NSRegularExpression(pattern: "<(t[dh])([^>]*)>([\\s\\S]*?)</\\1>", options: .caseInsensitive) else {
+            return html
+        }
+        let ns = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+        let mutable = NSMutableString(string: html)
+        for match in matches.reversed() {
+            let tag = ns.substring(with: match.range(at: 1))
+            let attrs = ns.substring(with: match.range(at: 2))
+            let inner = ns.substring(with: match.range(at: 3))
+                .replacingOccurrences(of: "<br\\s*/?>|<div[^>]*>|</div>|<p[^>]*>|</p>|\\r?\\n", with: " ", options: [.regularExpression, .caseInsensitive])
+            mutable.replaceCharacters(in: match.range, with: "<\(tag)\(attrs)>\(inner)</\(tag)>")
+        }
+        return mutable as String
     }
 
     private static func decodeHTMLEntities(_ input: String) -> String {

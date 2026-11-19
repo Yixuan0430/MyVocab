@@ -298,7 +298,7 @@ struct PracticeView: View {
                 .padding(.top, 4)
                 if detailsOpen {
                     CardDetailsPanel(parts: parts, accent: accent, l: l, scale: k, windowHeight: size.height, section: $section) { text, slow in
-                        speaker.say(text, language: deck?.language ?? "fr-FR", slow: slow)
+                        speaker.say(text, language: deck?.inferredSpeechLanguage ?? "fr-FR", slow: slow)
                     }
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
@@ -464,7 +464,7 @@ struct PracticeView: View {
 
     private func speak(slow: Bool = false) {
         if isNumbers { return speaker.say(card.back, language: "fr-FR", slow: slow) }
-        let speech = Speaker.resolveSpeech(front: parts.front, answer: parts.answer, deckLanguage: deck?.language)
+        let speech = Speaker.resolveSpeech(front: parts.front, answer: parts.answer, deckLanguage: deck?.inferredSpeechLanguage)
         speaker.say(speech.text, language: speech.language, slow: slow)
     }
 }

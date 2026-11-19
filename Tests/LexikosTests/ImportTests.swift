@@ -78,6 +78,109 @@ final class ImportTests: XCTestCase {
         XCTAssertEqual(map.extras, [3])
     }
 
+    func testRubyFuriganaHTMLCommentsAndNestedTableCells() {
+        let ruby = "<ruby>食<rp>(</rp><rt>た</rt><rp>)</rp></ruby>べる<!-- ignore -->"
+        XCTAssertEqual(Importer.clean(ruby), "食(た)べる")
+
+        let nested = "<table><tr><td><div>je</div></td><td><p>tu</p></td></tr><tr><td>fus</td><td>fus</td></tr></table>"
+        XCTAssertEqual(Importer.clean(nested), "je · tu\nfus · fus")
+    }
+
+    func testTokenMatchingProtectsIdiomFrontSideAndHandlesJapaneseGermanChineseFields() {
+        let noteType = AnkiImport.NoteType(
+            fields: ["Front Side", "Back Side", "Idiom", "Part-of-Speech 1", "Word Reading", "Note ID", "SubOrder", "Freq"],
+            qfmt: "{{Front Side}}",
+            afmt: "{{FrontSide}}<hr>{{Back Side}}{{Idiom}}{{Part-of-Speech 1}}{{Word Reading}}{{Note ID}}{{SubOrder}}{{Freq}}"
+        )
+        let map = AnkiImport.fieldMap(noteType)
+        XCTAssertEqual(map.front, [0])
+        XCTAssertEqual(map.answer, [1])
+        XCTAssertEqual(map.tag, 3)
+        XCTAssertEqual(map.hint, 4)
+        XCTAssertEqual(map.extras, [2])
+    }
+
+    func testMultiTemplatePrefersTextReadingTemplateOverAudioOnlyListeningTemplate() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("collection.anki2")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let models = """
+        {"1":{"flds":[{"ord":0,"name":"Audio"},{"ord":1,"name":"Word"},{"ord":2,"name":"Word Reading"},\
+        {"ord":3,"name":"Word Meaning"}],"tmpls":[{"ord":0,"qfmt":"{{Audio}}","afmt":"{{Word}}<br>{{Word Meaning}}"},\
+        {"ord":1,"qfmt":"{{Word}}","afmt":"{{FrontSide}}<hr>{{Word Reading}}<br>{{Word Meaning}}"}]}}
+        """
+        let sql = """
+        CREATE TABLE col (models TEXT);
+        CREATE TABLE notes (id INTEGER, mid INTEGER, flds TEXT);
+        INSERT INTO col VALUES ('\(models)');
+        INSERT INTO notes VALUES (1, 1, '[sound:a.mp3]\u{1f}家\u{1f}いえ\u{1f}house, home');
+        """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        let file = root.appendingPathComponent("multi-template.apkg")
+        let archive = try Archive(url: file, accessMode: .create)
+        try archive.addEntry(with: "collection.anki2", relativeTo: root)
+        let cards = try Importer.anki(file)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards[0].front, "家")
+        XCTAssertEqual(cards[0].back, "house, home")
+        XCTAssertEqual(cards[0].hint, "いえ")
+    }
+
+    func testClozeDeckMasksFrontAndExtractsAnswer() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("collection.anki2")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let models = """
+        {"1":{"flds":[{"ord":0,"name":"Id"},{"ord":1,"name":"Question"},{"ord":2,"name":"Choices"}],\
+        "tmpls":[{"ord":0,"qfmt":"{{cloze:Question}}","afmt":"{{cloze:Question}}<br>{{Choices}}"}]}}
+        """
+        let sql = """
+        CREATE TABLE col (models TEXT);
+        CREATE TABLE notes (id INTEGER, mid INTEGER, flds TEXT);
+        INSERT INTO col VALUES ('\(models)');
+        INSERT INTO notes VALUES (1, 1, '0281\u{1f}Why wasn&#39;t Sarah there? {{c1::She didn&#39;t want to come.::past}}\u{1f}Option A / Option B');
+        """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        let file = root.appendingPathComponent("cloze.apkg")
+        let archive = try Archive(url: file, accessMode: .create)
+        try archive.addEntry(with: "collection.anki2", relativeTo: root)
+        let cards = try Importer.anki(file)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards[0].front, "Why wasn't Sarah there? [past]")
+        XCTAssertTrue(cards[0].back.hasPrefix("She didn't want to come."))
+        XCTAssertTrue(cards[0].back.contains("Option A / Option B"))
+    }
+
+    func testCrossDeviceInferredSpeechLanguageWorksWithoutStoredLanguage() {
+        let byName = Deck(name: "JLPT N5 Vocab", cards: [Card(front: "水", back: "water")], language: nil)
+        XCTAssertEqual(byName.inferredSpeechLanguage, "ja-JP")
+
+        let byCards = Deck(
+            name: "Imported Pack",
+            cards: [
+                Card(front: "おはようございます", back: "good morning"),
+                Card(front: "ありがとうございます", back: "thank you")
+            ],
+            language: nil
+        )
+        XCTAssertEqual(byCards.inferredSpeechLanguage, "ja-JP")
+
+        let german = Deck(
+            name: "My Words",
+            cards: [Card(front: "Warum hast du mich gestern angerufen?", back: "Why did you call me yesterday?")],
+            language: nil
+        )
+        XCTAssertEqual(german.inferredSpeechLanguage, "de-DE")
+    }
+
     func testAnki21bZstdWithUnicaseCollationImportsCards() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

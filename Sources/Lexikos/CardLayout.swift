@@ -31,7 +31,7 @@ struct CardParts {
             .replacingOccurrences(of: "([.?!)…])(?=[A-ZÀ-ÖØ-Þ«])", with: "$1\n", options: .regularExpression)
             .replacingOccurrences(of: "([.?!][”\"»])(?=\\s*[A-ZÀ-ÖØ-Þ])", with: "$1\n", options: .regularExpression)
             .replacingOccurrences(of: "(?<=[^\\d\\s])(?=\\d+\\.\\s)", with: "\n", options: .regularExpression)
-            .replacingOccurrences(of: "(?<=[a-zà-ÿ])(?=[A-ZÀ-ÖØ-Þ][a-zà-ÿ])", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: "(?<=[a-zà-ÿ]{2})(?=[A-ZÀ-ÖØ-Þ][a-zà-ÿ])", with: "\n", options: .regularExpression)
             .replacingOccurrences(of: "(?<=[^\\s(])(?=(\(CardParts.headerPattern))\\s*:)", with: "\n",
                                   options: [.regularExpression, .caseInsensitive])
 
@@ -147,7 +147,7 @@ struct CardParts {
             if let r = line.range(of: sep) {
                 let l = String(line[..<r.lowerBound]), rr = String(line[r.upperBound...])
                 if l.filter({ $0 == "(" }).count != l.filter({ $0 == ")" }).count { continue }
-                if lang(l) == .french, lang(rr) == .english { return Item(fr: l, gloss: rr, text: line) }
+                if lang(l) != .english, lang(rr) == .english { return Item(fr: l, gloss: rr, text: line) }
             }
         }
         let (head, gloss) = splitGloss(line)

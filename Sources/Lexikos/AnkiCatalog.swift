@@ -417,13 +417,17 @@ struct CatalogL {
         "err.notFound": ["zh": "未找到该 AnkiWeb 词库（可能已下架）", "en": "Deck not found on AnkiWeb", "fr": "Paquet introuvable sur AnkiWeb"],
         "err.accessDenied": ["zh": "该词库暂不允许公开下载", "en": "Access to this deck is restricted", "fr": "Accès restreint à ce paquet"],
         "err.rateLimited": [
-            "zh": "AnkiWeb 匿名全站搜索暂时受限；可先浏览各语言分类，或直接粘贴 AnkiWeb 链接导入",
-            "en": "AnkiWeb anonymous search is rate-limited; browse language categories or paste a deck link directly",
-            "fr": "Recherche anonyme limitée sur AnkiWeb ; parcourez les langues ou collez un lien direct"
+            "zh": "AnkiWeb 暂时限流，请稍等片刻后重试（词库分类浏览与本地筛选不受影响）",
+            "en": "AnkiWeb is temporarily rate-limiting requests. Wait a moment and retry.",
+            "fr": "AnkiWeb limite temporairement les requêtes. Patientez un instant et réessayez."
         ],
         "err.network": ["zh": "网络连接失败，请检查网络后重试", "en": "Network error. Check connection and retry.", "fr": "Erreur réseau. Vérifiez la connexion."],
         "err.badResponse": ["zh": "AnkiWeb 返回了意外的数据格式", "en": "Unexpected response from AnkiWeb", "fr": "Réponse inattendue d’AnkiWeb"],
-        "err.importEmpty": ["zh": "该词库中没有可导入的文本卡片", "en": "No text cards found in this deck", "fr": "Aucune carte texte trouvée"],
+        "err.importEmpty": [
+            "zh": "该词库缺少可导入的文本正反面（例如卡片正面仅含图片或音频）",
+            "en": "No importable text front/back pairs found (cards may be image/audio only)",
+            "fr": "Aucune paire texte recto/verso trouvée (cartes peut-être uniquement image/audio)"
+        ],
         "err.importUnreadable": ["zh": "无法解析下载的 .apkg 文件", "en": "Could not parse the downloaded .apkg file", "fr": "Impossible de lire le fichier .apkg"]
     ]
 }
