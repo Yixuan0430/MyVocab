@@ -22,6 +22,7 @@ struct AnkiCatalogDetailPanel: View {
     let onDownload: (AnkiWebDeckDetail) -> Void
     let onCancelDownload: () -> Void
     let onOpenDeck: (Deck) -> Void
+    var onClose: (() -> Void)?
     @State private var audioPlayer = SampleAudioPlayer()
 
     var body: some View {
@@ -39,6 +40,12 @@ struct AnkiCatalogDetailPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .topTrailing) {
+            if detail == nil, let onClose {
+                Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 13, weight: .medium)).frame(width: 34, height: 34).touchTarget() }
+                    .buttonStyle(.plain).foregroundStyle(Color.muted).padding(12).keyboardShortcut(.cancelAction)
+            }
+        }
         .onChange(of: detail?.id) { audioPlayer.stop() }
         .onDisappear { audioPlayer.stop() }
     }
@@ -131,36 +138,32 @@ struct AnkiCatalogDetailPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 if let badge = languageBadge {
-                    Text(badge)
-                        .font(.system(size: 10.5, weight: .bold))
+                    Text(badge).font(.system(size: 10.5, weight: .bold))
                         .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(Capsule().fill(accent.soft))
-                        .foregroundStyle(accent.color)
+                        .background(Capsule().fill(accent.soft)).foregroundStyle(accent.color)
                 }
                 if isFeatured {
-                    Label(l["badge.featured"], systemImage: "sparkles")
-                        .font(.system(size: 10.5, weight: .semibold))
+                    Label(l["badge.featured"], systemImage: "sparkles").font(.system(size: 10.5, weight: .semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(Color.warm.opacity(0.24)))
-                        .foregroundStyle(Color.ink)
+                        .background(Capsule().fill(Color.warm.opacity(0.24))).foregroundStyle(Color.ink)
                 }
                 Spacer(minLength: 4)
                 Link(destination: detail.pageURL) {
                     Label(l["detail.openWeb"], systemImage: "arrow.up.right.square")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Color.muted)
+                        .font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.muted)
                 }
                 .buttonStyle(.plain)
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark").font(.system(size: 13, weight: .medium)).frame(width: 30, height: 30).touchTarget()
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Color.muted).keyboardShortcut(.cancelAction)
+                }
             }
-            Text(detail.title)
-                .font(.system(size: 20, weight: .medium, design: .serif))
-                .foregroundStyle(Color.ink)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(detail.title).font(.system(size: 20, weight: .medium, design: .serif))
+                .foregroundStyle(Color.ink).fixedSize(horizontal: false, vertical: true)
             if !detail.tags.isEmpty {
-                Text(detail.tags)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Color.muted)
-                    .lineLimit(2)
+                Text(detail.tags).font(.system(size: 11.5)).foregroundStyle(Color.muted).lineLimit(2)
             }
         }
     }
@@ -435,49 +438,40 @@ struct CatalogDeckRow: View {
     let l: CatalogL
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.windowSize) private var size
+    @Environment(\.locale) private var locale
 
     var body: some View {
+        let meta = HStack(spacing: 10) {
+            Label("\(deck.notes.formatted())", systemImage: "rectangle.stack").fixedSize()
+            Label("\(deck.thumbsUp)", systemImage: "hand.thumbsup").fixedSize()
+            if deck.modified.timeIntervalSince1970 > 0 {
+                Text(deck.modified.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: locale))).fixedSize()
+            }
+        }.font(.system(size: 11)).monospacedDigit().foregroundStyle(Color.muted)
+        let badges = HStack(spacing: 6) {
+            if deck.hasAudio { mediaBadge(icon: "speaker.wave.2.fill", text: "\(l["badge.audio"]) \(deck.audio.formatted())", active: true) }
+            if deck.hasImages { mediaBadge(icon: "photo.fill", text: "\(l["badge.images"]) \(deck.images.formatted())", active: true) }
+            if !deck.hasAudio && !deck.hasImages { mediaBadge(icon: "text.alignleft", text: l["badge.textOnly"], active: false) }
+        }
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
-                    Text(deck.title)
-                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Color.ink)
+                    Text(deck.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Color.ink)
                         .lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
                     if featured {
-                        Text(l["badge.featured"]).font(.system(size: 10, weight: .semibold))
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(Color.warm.opacity(0.24))).foregroundStyle(Color.ink)
+                        Text(l["badge.featured"]).font(.system(size: 10, weight: .semibold)).padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.warm.opacity(0.24))).foregroundStyle(Color.ink).fixedSize()
                     }
                 }
-                HStack(spacing: 6) {
-                    if deck.hasAudio {
-                        mediaBadge(icon: "speaker.wave.2.fill", text: "\(l["badge.audio"]) \(deck.audio.formatted())", active: true)
-                    }
-                    if deck.hasImages {
-                        mediaBadge(icon: "photo.fill", text: "\(l["badge.images"]) \(deck.images.formatted())", active: true)
-                    }
-                    if !deck.hasAudio && !deck.hasImages {
-                        mediaBadge(icon: "text.alignleft", text: l["badge.textOnly"], active: false)
-                    }
-                    Spacer(minLength: 4)
-                    HStack(spacing: 10) {
-                        Label("\(deck.notes.formatted())", systemImage: "rectangle.stack")
-                        Label("\(deck.thumbsUp)", systemImage: "hand.thumbsup")
-                        if deck.modified.timeIntervalSince1970 > 0 {
-                            Text(deck.modified.formatted(date: .abbreviated, time: .omitted))
-                        }
-                    }
-                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(Color.muted)
-                }
+                if size.narrow { VStack(alignment: .leading, spacing: 6) { badges; meta } }
+                else { HStack(spacing: 6) { badges; Spacer(minLength: 4); meta } }
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selected ? accent.faint : Color.panel))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(selected ? accent.fill : (hover ? Color.line : Color.lineSoft), lineWidth: selected ? 1.5 : 1)
-            )
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(selected ? accent.fill : (hover ? Color.line : Color.lineSoft), lineWidth: selected ? 1.5 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -490,7 +484,7 @@ struct CatalogDeckRow: View {
             Image(systemName: icon).font(.system(size: 10, weight: .semibold))
             Text(text).font(.system(size: 11, weight: .medium)).monospacedDigit()
         }
-        .padding(.horizontal, 8).padding(.vertical, 3)
+        .padding(.horizontal, 8).padding(.vertical, 3).fixedSize()
         .foregroundStyle(active ? accent.color : Color.muted)
         .background(Capsule().fill(active ? accent.soft : Color.well))
     }

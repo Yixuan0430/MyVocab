@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyVocab — Support</title>
+  <style>
+    :root { --bg: #f7f8f6; --card: #ffffff; --ink: #1f2e28; --muted: #5a6f66; --accent: #5d8a7a; --line: #e2ebe6; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #131211; --card: #1c1b19; --ink: #ece6df; --muted: #a0978d; --accent: #8cc7a8; --line: #2b2926; }
+    }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; background: var(--bg); color: var(--ink); line-height: 1.65; }
+    main { max-width: 720px; margin: 48px auto; padding: 0 20px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 28px; margin-bottom: 20px; }
+    h1 { font-family: Didot, Georgia, serif; font-weight: 500; font-size: 34px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    p, li { color: var(--muted); font-size: 15px; }
+    a { color: var(--accent); text-decoration: none; font-weight: 500; }
+    a:hover { text-decoration: underline; }
+    .nav { display: flex; gap: 18px; margin-top: 14px; font-size: 14px; }
+    ul { padding-left: 20px; margin: 8px 0 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>MyVocab</h1>
+      <p>Spaced-repetition vocabulary flashcards, forgetting-curve analytics, multi-language TTS pronunciation, and private iCloud sync across iPhone, iPad, and Mac.</p>
+      <div class="nav">
+        <a href="./privacy.html">Privacy Policy / 隐私政策</a>
+        <a href="https://github.com/Yixuan0430/MyVocab/issues">Report an Issue / 反馈问题</a>
+        <a href="https://github.com/Yixuan0430/MyVocab">GitHub Repository</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Support &amp; FAQ / 支持与常见问题</h2>
+      <ul>
+        <li><strong>Importing decks:</strong> Import local <code>.apkg</code> (including modern <code>.anki21b</code>), <code>.csv</code>, or <code>.txt</code> files from the Files app, AirDrop, or browse community-shared decks via the built-in AnkiWeb catalog.</li>
+        <li><strong>iCloud Sync:</strong> Sign in with the same Apple Account and enable iCloud Drive on your iPhone, iPad, and Mac. Your decks, review history, and study preferences sync privately via Apple CloudKit.</li>
+        <li><strong>Pronunciation:</strong> MyVocab uses Apple system text-to-speech (AVSpeechSynthesizer) automatically matched to each deck's language. You can download enhanced voices in iOS Settings &gt; Accessibility &gt; Spoken Content &gt; Voices.</li>
+        <li><strong>Contact:</strong> For bug reports or feature requests, open an issue on <a href="https://github.com/Yixuan0430/MyVocab/issues">GitHub Issues</a> or email <a href="mailto:yixuancn2026@gmail.com">yixuancn2026@gmail.com</a>.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

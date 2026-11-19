@@ -7,7 +7,7 @@ struct PracticeView: View {
     let source: Source
     @Binding var route: Route?
 
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("level") private var level = Level.units
     @AppStorage("showDetails") private var showDetails = false
@@ -141,6 +141,11 @@ struct PracticeView: View {
             Spacer(minLength: 16)
             #if os(macOS)
             footer
+            #else
+            if !settingUpFree && !finished {
+                Text(learning ? l["tap.learn"] : revealed ? (isStudy ? l["tap.ios.grade"] : l["tap.ios.next"]) : l["tap.ios.reveal"])
+                    .font(.system(size: 11.5)).foregroundStyle(Color.faint).padding(.top, 6)
+            }
             #endif
         }
         .padding(.horizontal, size.gutter).padding(.top, size.top).padding(.bottom, pageBottom)

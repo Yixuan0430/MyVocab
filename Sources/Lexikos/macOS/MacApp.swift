@@ -6,7 +6,7 @@ struct LexikosApp: App {
     @State private var store = DeckStore()
     @State private var progress = ProgressStore()
     @State private var updater = Updater()
-    @AppStorage("lang", store: Runtime.current.defaults) private var lang = AppLanguage.zh
+    @AppStorage("lang", store: Runtime.current.defaults) private var lang = AppLanguage.systemDefault
     @AppStorage("appearance", store: Runtime.current.defaults) private var appearance = Appearance.system.rawValue
 
     init() {

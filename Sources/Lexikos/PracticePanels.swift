@@ -32,42 +32,60 @@ struct PracticeHeaderBar: View {
     let onLevelChange: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: onBack) {
-                Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading)
-            }
-            .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted).accessibilityLabel(l["back"])
-            Spacer()
-            if isNumbers {
-                HStack(spacing: 4) {
-                    ForEach(Level.allCases) { lv in
-                        Chip(title: lv.label, selected: level == lv, accent: accent) { level = lv }
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: onBack) {
+                    Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading)
                 }
-                .padding(3).background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.lineSoft))
-                .onChange(of: level) { onLevelChange() }
-            } else if let d = deck {
-                if !(narrow && isStudy && !finished) {
-                    Text(d.displayName)
-                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.muted).lineLimit(1)
-                }
-                if isStudy && !finished {
-                    HStack(spacing: 10) {
-                        Text("\(narrow ? "" : "· ")\(l["group.label"]) #\(groupIndex)")
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted).fixedSize()
-                        HStack(spacing: 6) {
-                            badgeCount(counts.review, color: Color.pos, label: l["badge.review"])
-                            badgeCount(counts.learning, color: Color.warn, label: l["badge.learning"])
-                            badgeCount(counts.new, color: accent.fill, label: l["badge.new"])
+                .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted).fixedSize().accessibilityLabel(l["back"])
+                Spacer()
+                if isNumbers {
+                    HStack(spacing: 4) {
+                        ForEach(Level.allCases) { lv in
+                            Chip(title: lv.label, selected: level == lv, accent: accent) { level = lv }
                         }
-                        Text("(\(l["remaining"]) \(remainingStudy))")
-                            .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit().fixedSize()
                     }
-                } else if isFree && !settingUpFree && !finished {
-                    Text("· \(l["remaining"]) \(remainingFree) / \(freeTotal)")
-                        .font(.system(size: 13)).foregroundStyle(Color.muted).monospacedDigit()
+                    .padding(3).background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.lineSoft))
+                    .onChange(of: level) { onLevelChange() }
+                } else if let d = deck {
+                    if !(narrow && isStudy && !finished) {
+                        Text(d.displayName)
+                            .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.muted).lineLimit(1)
+                    }
+                    if isStudy && !finished {
+                        if narrow {
+                            HStack(spacing: 6) {
+                                Text("\(l["group.label"]) #\(groupIndex)")
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted).fixedSize()
+                                Text("(\(l["remaining"]) \(remainingStudy))")
+                                    .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit().fixedSize()
+                            }
+                        } else {
+                            HStack(spacing: 10) {
+                                Text("· \(l["group.label"]) #\(groupIndex)")
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted).fixedSize()
+                                studyBadges
+                                Text("(\(l["remaining"]) \(remainingStudy))")
+                                    .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit().fixedSize()
+                            }
+                        }
+                    } else if isFree && !settingUpFree && !finished {
+                        Text("· \(l["remaining"]) \(remainingFree) / \(freeTotal)")
+                            .font(.system(size: 13)).foregroundStyle(Color.muted).monospacedDigit().fixedSize()
+                    }
                 }
             }
+            if narrow && isStudy && !finished && deck != nil {
+                studyBadges.frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    private var studyBadges: some View {
+        HStack(spacing: 6) {
+            badgeCount(counts.review, color: Color.pos, label: l["badge.review"])
+            badgeCount(counts.learning, color: Color.warn, label: l["badge.learning"])
+            badgeCount(counts.new, color: accent.fill, label: l["badge.new"])
         }
     }
 

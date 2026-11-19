@@ -5,7 +5,7 @@ struct LexikosApp: App {
     @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var store = DeckStore()
     @State private var progress = ProgressStore()
-    @AppStorage("lang", store: Runtime.current.defaults) private var lang = AppLanguage.zh
+    @AppStorage("lang", store: Runtime.current.defaults) private var lang = AppLanguage.systemDefault
     @AppStorage("appearance", store: Runtime.current.defaults) private var appearance = Appearance.system
 
     init() { AppTheme.shared.load(from: Runtime.current.defaults) }

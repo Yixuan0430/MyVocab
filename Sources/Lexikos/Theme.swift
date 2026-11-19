@@ -235,6 +235,12 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     case zh, en, fr
     var id: String { rawValue }
     var label: String { ["zh": "中文", "en": "English", "fr": "Français"][rawValue]! }
+    static var systemDefault: AppLanguage {
+        let code = (Locale.preferredLanguages.first ?? "").lowercased()
+        if code.hasPrefix("zh") { return .zh }
+        if code.hasPrefix("fr") { return .fr }
+        return .en
+    }
 }
 
 struct L {
@@ -384,7 +390,7 @@ struct L {
         "err.save": ["zh": "保存失败，请重试：", "en": "Save failed, please retry: ", "fr": "Échec de l’enregistrement : "],
         "err.speak": ["zh": "朗读失败：", "en": "Speech failed: ", "fr": "Échec de la lecture : "],
         "home.title": ["zh": "词库", "en": "Decks", "fr": "Paquets"],
-        "home.subtitle": ["zh": "法语词汇与记忆", "en": "French words, remembered", "fr": "Le français, mot à mot"],
+        "home.subtitle": ["zh": "多语言词汇与记忆", "en": "Words, remembered", "fr": "Les mots, mémorisés"],
         "builtin": ["zh": "内置", "en": "Built-in", "fr": "Intégré"],
         "imported": ["zh": "已导入", "en": "Imported", "fr": "Importés"],
         "numbers.name": ["zh": "法语数字", "en": "French numbers", "fr": "Les nombres"],
@@ -417,6 +423,21 @@ struct L {
         "sec.study": ["zh": "学习", "en": "Study", "fr": "Étude"],
         "sec.general": ["zh": "通用", "en": "General", "fr": "Général"],
         "sec.data": ["zh": "数据与同步", "en": "Data & sync", "fr": "Données et synchro"],
+        "sec.about": ["zh": "关于与隐私", "en": "About & privacy", "fr": "À propos et confidentialité"],
+        "about.version": ["zh": "版本", "en": "Version", "fr": "Version"],
+        "about.privacy": ["zh": "隐私政策", "en": "Privacy Policy", "fr": "Politique de confidentialité"],
+        "about.support": ["zh": "技术支持", "en": "Support", "fr": "Assistance"],
+        "about.credit": [
+            "zh": "词库目录展示来自 AnkiWeb 社区的公开共享词库，版权归原作者所有。",
+            "en": "Shared decks are sourced from the public AnkiWeb community and belong to their respective authors.",
+            "fr": "Les paquets partagés proviennent de la communauté AnkiWeb et appartiennent à leurs auteurs."
+        ],
+        "cancel": ["zh": "取消", "en": "Cancel", "fr": "Annuler"],
+        "delete.confirm": ["zh": "确定要删除这个词库及本地记录吗？", "en": "Delete this deck and its study history?", "fr": "Supprimer ce paquet et son historique ?"],
+        "paste": ["zh": "粘贴", "en": "Paste", "fr": "Coller"],
+        "tap.ios.reveal": ["zh": "轻点翻开答案", "en": "Tap to reveal", "fr": "Touchez pour révéler"],
+        "tap.ios.next": ["zh": "轻点继续下一张", "en": "Tap for next card", "fr": "Touchez pour la suivante"],
+        "tap.ios.grade": ["zh": "点按评分，或左滑没记住 · 右滑记住了", "en": "Tap to rate, or swipe left / right", "fr": "Notez ou glissez gauche / droite"],
         "data.location": ["zh": "数据位置", "en": "Data folder", "fr": "Dossier des données"],
         "data.reveal": ["zh": "在访达中显示", "en": "Show in Finder", "fr": "Afficher dans le Finder"],
         "data.decks": ["zh": "词库", "en": "Decks", "fr": "Paquets"],

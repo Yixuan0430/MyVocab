@@ -1,11 +1,13 @@
 import SwiftUI
 import Charts
+import UniformTypeIdentifiers
 
 struct OverviewView: View {
     let deck: Deck
     @Binding var route: Route?
+    @Environment(DeckStore.self) private var store
     @Environment(ProgressStore.self) private var progress
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("newPerDay") private var newPerDay = 20
     @AppStorage("groupSize") private var groupSize = 10
@@ -13,6 +15,9 @@ struct OverviewView: View {
     @State private var query = ""
     @State private var filter = WordFilter.all
     @State private var showAll = false
+    @State private var confirmDelete = false
+    @State private var reimporting = false
+    @State private var importError: String?
     @Environment(\.windowSize) private var size
 
     enum WordFilter: String, CaseIterable { case all, weak, strong }
@@ -28,6 +33,13 @@ struct OverviewView: View {
                 Button { route = nil } label: { Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading) }
                     .buttonStyle(.plain).foregroundStyle(Color.muted).keyboardShortcut(.cancelAction)
                 Spacer()
+                Menu {
+                    Button(l["reimport"]) { reimporting = true }
+                    Button(l["delete"], role: .destructive) { confirmDelete = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 15)).frame(width: 30, height: 30).touchTarget(.trailing)
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).foregroundStyle(Color.muted)
             }
             .padding(.bottom, 18)
 
@@ -53,6 +65,28 @@ struct OverviewView: View {
                 WordCurveSheet(card: deck.cards[item.id], state: st, accent: accent, l: l)
             }
         }
+        .confirmationDialog(l["delete.confirm"], isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button(l["delete"], role: .destructive) {
+                if store.delete(deck) { progress.forget(deck); route = nil }
+            }
+            Button(l["cancel"], role: .cancel) {}
+        }
+        .fileImporter(isPresented: $reimporting, allowedContentTypes: [
+            UTType(filenameExtension: "apkg") ?? .data, .commaSeparatedText, .tabSeparatedText, .plainText
+        ]) { result in
+            guard case .success(let url) = result else { return }
+            Task { @MainActor in
+                do {
+                    try await store.loadFile(url, replacing: deck.id)
+                    if let updated = store.deck(deck.id) { route = .overview(updated) }
+                } catch let e as ImportError {
+                    importError = l[["anki21b": "err.anki21b", "empty": "err.empty"]["\(e)"] ?? "err.unreadable"]
+                } catch { importError = error.localizedDescription }
+            }
+        }
+        .alert(l["import.failed"], isPresented: .constant(importError != nil)) {
+            Button(l["ok"]) { importError = nil }
+        } message: { Text(importError ?? "") }
     }
 
     private var today: some View {
@@ -76,38 +110,51 @@ struct OverviewView: View {
                     .font(.system(size: 13)).foregroundStyle(Color.muted).monospacedDigit()
             }
             if !size.compact { Spacer() }
-            HStack(spacing: 10) {
-                Menu {
-                    ForEach([5, 10, 15, 20, 30], id: \.self) { n in
-                        Button { groupSize = n } label: {
-                            if groupSize == n { Label("\(l["group.per"]) \(n) \(l["group.words"])", systemImage: "checkmark") }
-                            else { Text("\(l["group.per"]) \(n) \(l["group.words"])") }
-                        }
+            if size.narrow {
+                VStack(alignment: .leading, spacing: 10) {
+                    Button { route = .study(deck) } label: {
+                        Label(p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"], systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "square.grid.2x2").font(.system(size: 12))
-                        Text("\(l["group.per"]) \(groupSize) \(l["group.words"])").font(.system(size: 13, weight: .medium)).monospacedDigit()
-                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.muted)
+                    .buttonStyle(.capsule(.primary, accent)).keyboardShortcut(.defaultAction).disabled(p.groupQueue.isEmpty)
+                    HStack(spacing: 10) {
+                        groupSizeMenu
+                        Button { route = .free(deck) } label: { Label(l["free"], systemImage: "shuffle") }
+                            .buttonStyle(.capsule(.secondary, accent)).disabled(deck.cards.isEmpty)
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
                 }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-                .accessibilityLabel(l["group.size"])
-
-                Button { route = .free(deck) } label: { Label(l["free"], systemImage: "shuffle") }
-                    .buttonStyle(.capsule(.secondary, accent))
-                    .disabled(deck.cards.isEmpty)
-
-                Button { route = .study(deck) } label: {
-                    Label(p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"], systemImage: "play.fill")
+            } else {
+                HStack(spacing: 10) {
+                    groupSizeMenu
+                    Button { route = .free(deck) } label: { Label(l["free"], systemImage: "shuffle") }
+                        .buttonStyle(.capsule(.secondary, accent)).disabled(deck.cards.isEmpty)
+                    Button { route = .study(deck) } label: {
+                        Label(p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"], systemImage: "play.fill")
+                    }
+                    .buttonStyle(.capsule(.primary, accent)).keyboardShortcut(.defaultAction).disabled(p.groupQueue.isEmpty)
                 }
-                .buttonStyle(.capsule(.primary, accent))
-                .keyboardShortcut(.defaultAction)
-                .disabled(p.groupQueue.isEmpty)
             }
         }
+    }
+
+    private var groupSizeMenu: some View {
+        Menu {
+            ForEach([5, 10, 15, 20, 30], id: \.self) { n in
+                Button { groupSize = n } label: {
+                    if groupSize == n { Label("\(l["group.per"]) \(n) \(l["group.words"])", systemImage: "checkmark") }
+                    else { Text("\(l["group.per"]) \(n) \(l["group.words"])") }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "square.grid.2x2").font(.system(size: 12))
+                Text("\(l["group.per"]) \(groupSize) \(l["group.words"])").font(.system(size: 13, weight: .medium)).monospacedDigit()
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.muted)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(Capsule().fill(Color.panel)).overlay(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().accessibilityLabel(l["group.size"])
     }
 
     private var stats: some View {
@@ -406,7 +453,7 @@ struct WordCurveSheet: View {
             .chartXAxis { AxisMarks { _ in AxisValueLabel(format: .dateTime.month().day()).foregroundStyle(Color.muted) } }
             .frame(height: 220)
 
-            HStack(spacing: 18) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 10)], alignment: .leading, spacing: 10) {
                 fact(l["word.retention"], "\(Int(state.retention(at: .now) * 100))%")
                 fact(l["word.stability"], PracticeView.interval(state.stability, l, later: false))
                 fact(l["word.reviews"], "\(state.reviews.count)")

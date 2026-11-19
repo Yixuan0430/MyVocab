@@ -155,7 +155,7 @@ struct TodayView: View {
         switch family {
         #if os(iOS)
         case .accessoryCircular:
-            Gauge(value: s.progress) { Text("Lx") } currentValueLabel: { Text("\(s.left)") }
+            Gauge(value: s.progress) { Text("MV") } currentValueLabel: { Text("\(s.left)") }
                 .gaugeStyle(.accessoryCircular).containerBackground(for: .widget) { Color.clear }
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {

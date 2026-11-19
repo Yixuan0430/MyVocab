@@ -5,7 +5,7 @@ struct AnkiCatalogView: View {
     @Environment(DeckStore.self) private var store
     @Environment(\.windowSize) private var size
     @Environment(\.snapshotting) private var snapshotting
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("catalogLang") private var storedLanguage = CatalogLanguage.french.rawValue
 
@@ -91,14 +91,10 @@ struct AnkiCatalogView: View {
         .onDisappear { listTask?.cancel(); detailTask?.cancel(); downloadTask?.cancel() }
         .sheet(isPresented: $showDetailSheet) {
             detailInspector
-                .overlay(alignment: .topTrailing) {
-                    Button { showDetailSheet = false } label: { Image(systemName: "xmark").frame(width: 28, height: 28) }
-                        .buttonStyle(.plain).foregroundStyle(Color.muted).padding(14)
-                        .keyboardShortcut(.cancelAction).accessibilityLabel(l["ok"])
-                }
                 #if os(macOS)
                 .frame(width: 520, height: 640)
                 #else
+                .padding(.top, 8)
                 .presentationBackground(Color.bg)
                 #endif
         }
@@ -146,6 +142,13 @@ struct AnkiCatalogView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(Color.faint)
                     }
                     .buttonStyle(.plain).accessibilityLabel("Clear")
+                } else {
+                    #if os(iOS)
+                    Button(l["paste"]) {
+                        if let text = UIPasteboard.general.string { linkInput = text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    }
+                    .buttonStyle(.capsule(.secondary, accent))
+                    #endif
                 }
                 Button(cl["link.open"], action: openFromLink)
                     .buttonStyle(.capsule(.soft, accent))
@@ -324,6 +327,7 @@ struct AnkiCatalogView: View {
                     }
                     .padding(.vertical, 2).padding(.bottom, 16)
                 }
+                .scrollDismissesKeyboard(.interactively)
             }
         }
     }
@@ -359,16 +363,14 @@ struct AnkiCatalogView: View {
             onOpenDeck: { deck in
                 showDetailSheet = false
                 route = .overview(deck)
-            }
+            },
+            onClose: showDetailSheet ? { showDetailSheet = false } : nil
         )
     }
 
     private func selectLanguage(_ language: CatalogLanguage) {
-        selectedLanguage = language
-        storedLanguage = language.rawValue
-        selectedLevel = .all
-        remoteQuery = nil
-        localQuery = ""
+        selectedLanguage = language; storedLanguage = language.rawValue
+        selectedLevel = .all; remoteQuery = nil; localQuery = ""
         loadCatalog(forceRefresh: false)
     }
 
@@ -380,24 +382,15 @@ struct AnkiCatalogView: View {
     }
 
     private func openFromLink() {
-        guard let sharedID = AnkiWebClient.parseSharedID(linkInput) else {
-            linkError = cl["err.invalidLink"]
-            return
-        }
-        linkError = nil
-        selectedID = sharedID
-        selectedSummary = decks.first { $0.id == sharedID }
-        selectedDetail = nil
+        guard let sharedID = AnkiWebClient.parseSharedID(linkInput) else { linkError = cl["err.invalidLink"]; return }
+        linkError = nil; selectedID = sharedID; selectedSummary = decks.first { $0.id == sharedID }; selectedDetail = nil
         if size.compact { showDetailSheet = true }
         loadDetail(sharedID: sharedID, forceRefresh: false)
     }
 
     private func selectDeck(_ deck: AnkiWebDeckSummary) {
-        selectedID = deck.id
-        selectedSummary = deck
-        if selectedDetail?.id != deck.id {
-            selectedDetail = nil
-        }
+        selectedID = deck.id; selectedSummary = deck
+        if selectedDetail?.id != deck.id { selectedDetail = nil }
         if size.compact { showDetailSheet = true }
         loadDetail(sharedID: deck.id, forceRefresh: false)
     }

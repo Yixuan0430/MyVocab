@@ -13,7 +13,7 @@ private struct WidgetFeedModifier: ViewModifier {
     @Environment(\.scenePhase) private var phase
     @AppStorage("newPerDay") private var newPerDay = 20
     @AppStorage("startDeck") private var startDeck = ""
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("accent") private var accent = Accent.moss
 
     private var stamp: [AnyHashable] {

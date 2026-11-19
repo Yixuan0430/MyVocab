@@ -36,6 +36,10 @@ import Observation
 
     func say(_ text: String, language: String? = nil, slow: Bool = false) {
         guard !text.isEmpty else { return }
+        #if os(iOS)
+        do { try AVAudioSession.sharedInstance().setActive(true) }
+        catch { lastError = error.localizedDescription }
+        #endif
         stop()
         token += 1
         let mine = token
@@ -136,6 +140,10 @@ import Observation
             return
         }
         stop()
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: .duckOthers)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        #endif
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         player = p

@@ -8,12 +8,15 @@ settings:
     DEVELOPMENT_TEAM: BGM8P5U985
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: 1.2.0
-    CURRENT_PROJECT_VERSION: 2
+    CURRENT_PROJECT_VERSION: 3
     SWIFT_VERSION: 5.0
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: MyVocab
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.education
     SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CLOUDKIT"
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG CLOUDKIT"
 packages:
   ZIPFoundation: { url: https://github.com/weichsel/ZIPFoundation.git, exactVersion: 0.9.20 }
   zstd: { url: https://github.com/facebook/zstd.git, exactVersion: 1.5.7 }
@@ -25,6 +28,8 @@ targets:
       - path: Sources/Lexikos
         excludes: ["iOS/**"]
       - path: Resources/Lexikos.icns
+        buildPhase: resources
+      - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: scripts/myvocab-mcp.py
         buildPhase: resources
@@ -59,6 +64,8 @@ targets:
       - path: Sources/Lexikos
         excludes: ["macOS/**"]
       - Resources/Assets.xcassets
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - { package: ZIPFoundation }
       - { package: zstd, product: libzstd }
@@ -72,11 +79,19 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Config/Lexikos-iOS.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Config/Lexikos-iOS-Release.entitlements
     info:
       path: Config/Lexikos-iOS-Info.plist
       properties:
+        CFBundleDisplayName: MyVocab
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleLocalizations: [zh-Hans, en, fr]
+        ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes: [remote-notification]
         CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos, myvocab] }]
         LSSupportsOpeningDocumentsInPlace: false
@@ -92,14 +107,6 @@ targets:
             UTTypeDescription: Anki deck package
             UTTypeConformsTo: [public.data, public.archive]
             UTTypeTagSpecification: { public.filename-extension: [apkg] }
-    entitlements:
-      path: Config/Lexikos-iOS.entitlements
-      properties:
-        com.apple.developer.icloud-container-identifiers: [iCloud.com.yixuanwu.lexikos]
-        com.apple.developer.icloud-services: [CloudKit]
-        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
-        aps-environment: development
-        com.apple.security.application-groups: [group.com.yixuanwu.lexikos]
   LexikosWidgets-iOS:
     type: app-extension
     platform: iOS
@@ -107,6 +114,8 @@ targets:
       - Sources/Widgets
       - Sources/Lexikos/WidgetData.swift
       - Sources/Lexikos/Theme.swift
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: LexikosWidgets

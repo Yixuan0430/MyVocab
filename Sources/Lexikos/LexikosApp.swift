@@ -15,10 +15,12 @@ enum Route: Hashable { case numbers, catalog, overview(Deck), study(Deck), free(
 struct RootView: View {
     @Environment(DeckStore.self) private var store
     @Environment(ProgressStore.self) private var progress
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("appearance") private var appearance = Appearance.system
+    @AppStorage("startDeck") private var startDeck = ""
     @State private var route: Route?
+    @State private var importError: String?
 
     var body: some View {
         let l = L(lang: lang)
@@ -39,9 +41,39 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: route)
-        .onAppear { AppTheme.shared.accent = accent; AppTheme.shared.appearance = appearance }
+        .onAppear {
+            AppTheme.shared.accent = accent; AppTheme.shared.appearance = appearance
+            #if DEBUG
+            if let r = ProcessInfo.processInfo.environment["MYVOCAB_ROUTE"] { openRoute(r) }
+            #endif
+        }
         .onChange(of: accent) { AppTheme.shared.accent = accent }
         .onChange(of: appearance) { AppTheme.shared.appearance = appearance }
+        .onOpenURL { url in
+            if ["lexikos", "myvocab"].contains(url.scheme ?? "") { openRoute(url.host); return }
+            Task { @MainActor in
+                defer { if url.path.contains("/Documents/Inbox/") { try? FileManager.default.removeItem(at: url) } }
+                do { try await store.loadFile(url); route = nil }
+                catch let e as ImportError {
+                    importError = l[["anki21b": "err.anki21b", "empty": "err.empty"]["\(e)"] ?? "err.unreadable"]
+                } catch { importError = error.localizedDescription }
+            }
+        }
+        .alert(l["import.failed"], isPresented: .constant(importError != nil)) {
+            Button(l["ok"]) { importError = nil }
+        } message: { Text(importError ?? "") }
+    }
+
+    private func openRoute(_ host: String?) {
+        let target = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first
+        switch host {
+        case "study": if let d = target { route = .study(d) }
+        case "overview": if let d = target { route = .overview(d) }
+        case "catalog": route = .catalog
+        case "numbers": route = .numbers
+        case "home": route = nil
+        default: break
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -67,7 +99,7 @@ struct HomeView: View {
     @AppStorage("groupSize") private var groupSize = 10
     @AppStorage("startDeck") private var startDeck = ""
     @Environment(\.windowSize) private var size
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("accent") private var accent = Accent.moss
     @State private var importing = false
     @State private var reimportTarget: UUID?
@@ -144,20 +176,14 @@ struct HomeView: View {
             reimportTarget = nil
             load(url, into: target)
         }
-        .onOpenURL { url in
-            guard ["lexikos", "myvocab"].contains(url.scheme ?? "") else { return load(url, into: nil) }
-            if url.host == "study", let d = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
-                route = .study(d)
-            }
-        }
         .alert(l["import.failed"], isPresented: .constant(error != nil)) {
             Button(l["ok"]) { error = nil }
         } message: { Text(error ?? "") }
         .sheet(isPresented: $showSettings) {
             settings
                 .overlay(alignment: .topTrailing) {
-                    Button { showSettings = false } label: { Image(systemName: "xmark").frame(width: 28, height: 28) }
-                        .buttonStyle(.plain).foregroundStyle(Color.muted).padding(14)
+                    Button { showSettings = false } label: { Image(systemName: "xmark").frame(width: 30, height: 30).touchTarget() }
+                        .buttonStyle(.plain).foregroundStyle(Color.muted).padding(16)
                         .keyboardShortcut(.cancelAction).accessibilityLabel(l["ok"])
                 }
         }
@@ -270,6 +296,11 @@ struct HomeView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(p.groupQueue.isEmpty)
             }
+        } else {
+            Button { route = .catalog } label: {
+                Label(l["catalog"], systemImage: "globe").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.capsule(.primary, accent))
         }
     }
 
@@ -282,7 +313,7 @@ struct HomeView: View {
 }
 
 struct SettingsView: View {
-    @AppStorage("lang") private var lang = AppLanguage.zh
+    @AppStorage("lang") private var lang = AppLanguage.systemDefault
     @AppStorage("appearance") private var appearance = Appearance.system
     @AppStorage("accent") private var accent = Accent.moss
     @AppStorage("newPerDay") private var newPerDay = 20
@@ -348,6 +379,7 @@ struct SettingsView: View {
                 }
 
                 group(l["sec.data"]) { dataRows }
+                group(l["sec.about"]) { aboutRows }
             }
             .padding(28)
         }
@@ -355,33 +387,59 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var dataRows: some View {
+        #if os(macOS)
         let path = Runtime.current.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(l["data.location"]).font(.system(size: 13)).foregroundStyle(Color.ink)
                 Spacer()
-                #if os(macOS)
                 Button(l["data.reveal"]) { NSWorkspace.shared.activateFileViewerSelecting([Runtime.current.root]) }
                     .buttonStyle(.capsule(.secondary, accent))
-                #endif
             }
             Text(path).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Color.muted)
                 .textSelection(.enabled).lineLimit(2).truncationMode(.middle)
-            if let store {
-                let cards = store.decks.map(\.cards.count).reduce(0, +)
-                let studied = progress.map { p in store.decks.map { p.states($0).count }.reduce(0, +) } ?? 0
-                Text(String(format: l["data.summary"], store.decks.count, cards, studied))
-                    .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit()
-            }
+            if let store { summaryText(store) }
         }
         .padding(.vertical, 12)
         divider
+        #else
+        if let store {
+            row(l["data.decks"]) { summaryText(store) }
+            divider
+        }
+        #endif
         row(l["sync"]) {
             HStack(spacing: 6) {
                 Circle().fill(syncState.1).frame(width: 7, height: 7)
                 Text(syncState.0).font(.system(size: 12)).foregroundStyle(Color.muted).multilineTextAlignment(.trailing)
             }
         }
+    }
+
+    private func summaryText(_ store: DeckStore) -> some View {
+        let cards = store.decks.map(\.cards.count).reduce(0, +)
+        let studied = progress.map { p in store.decks.map { p.states($0).count }.reduce(0, +) } ?? 0
+        return Text(String(format: l["data.summary"], store.decks.count, cards, studied))
+            .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit()
+    }
+
+    @ViewBuilder private var aboutRows: some View {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
+        row(l["about.version"]) { Text("v\(version)").font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Color.muted) }
+        divider
+        row(l["about.privacy"]) {
+            Link(destination: URL(string: "https://yixuan0430.github.io/MyVocab/privacy.html")!) {
+                Label(l["about.privacy"], systemImage: "arrow.up.right.square").font(.system(size: 12)).foregroundStyle(accent.color)
+            }
+        }
+        divider
+        row(l["about.support"]) {
+            Link(destination: URL(string: "https://yixuan0430.github.io/MyVocab/")!) {
+                Label(l["about.support"], systemImage: "arrow.up.right.square").font(.system(size: 12)).foregroundStyle(accent.color)
+            }
+        }
+        divider
+        Text(l["about.credit"]).font(.system(size: 11.5)).foregroundStyle(Color.muted).padding(.vertical, 10)
     }
 
     private var syncState: (String, Color) {
