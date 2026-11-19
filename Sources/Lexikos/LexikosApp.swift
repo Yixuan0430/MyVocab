@@ -10,7 +10,7 @@ enum Level: Int, CaseIterable, Identifiable {
     var label: String { "\(range.lowerBound)–\(range.upperBound)" }
 }
 
-enum Route: Hashable { case numbers, overview(Deck), study(Deck), free(Deck) }
+enum Route: Hashable { case numbers, catalog, overview(Deck), study(Deck), free(Deck) }
 
 struct RootView: View {
     @Environment(DeckStore.self) private var store
@@ -48,6 +48,7 @@ struct RootView: View {
         switch route {
         case nil: HomeView(route: $route)
         case .numbers: PracticeView(source: .numbers, route: $route)
+        case .catalog: AnkiCatalogView(route: $route)
         case .overview(let d): OverviewView(deck: d, route: $route)
         case .study(let d): PracticeView(source: .study(d), route: $route).id("study-\(d.id)")
         case .free(let d): PracticeView(source: .free(d), route: $route).id("free-\(d.id)")
@@ -121,6 +122,9 @@ struct HomeView: View {
                                 Button(l["reimport"]) { reimportTarget = deck.id; importing = true }
                                 Button(l["delete"], role: .destructive) { if store.delete(deck) { progress.forget(deck) } }
                             }
+                        }
+                        ImportTile(title: l["catalog"], detail: l["catalog.desc"], accent: accent, icon: "globe", emphasized: true) {
+                            route = .catalog
                         }
                         ImportTile(title: l["import"], detail: l["import.desc"], accent: accent) { importing = true }
                     }
@@ -274,71 +278,6 @@ struct HomeView: View {
             SectionLabel(text: title)
             LazyVGrid(columns: cols, alignment: .leading, spacing: 16) { content() }
         }
-    }
-}
-
-struct DeckTile: View {
-    let title: String, detail: String, glyph: String, accent: Accent
-    var progress: Double?
-    let action: () -> Void
-    @State private var hover = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Text(glyph).font(.custom("Didot", size: 22)).foregroundStyle(accent.color)
-                    .frame(width: 48, height: 48).background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(accent.soft))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(Color.ink).lineLimit(1).truncationMode(.middle)
-                    Text(detail).font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit().lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let progress {
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.well)
-                            Capsule().fill(accent.fill).frame(width: max(3, 140 * progress))
-                        }
-                        .frame(width: 140, height: 4).padding(.top, 2)
-                        .accessibilityLabel("\(Int(progress * 100))%")
-                    }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.faint)
-                    .opacity(hover ? 1 : 0.5)
-            }
-            .padding(16)
-            .frame(maxHeight: .infinity)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.panel))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(hover ? accent.fill : Color.lineSoft))
-            .shadow(color: Color.shade.opacity(hover ? 0.09 : 0.05), radius: hover ? 16 : 10, y: hover ? 8 : 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-struct ImportTile: View {
-    let title: String, detail: String, accent: Accent
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: "plus").font(.system(size: 18, weight: .light)).foregroundStyle(Color.muted)
-                    .frame(width: 48, height: 48)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(Color.ink)
-                    Text(detail).font(.system(size: 12)).foregroundStyle(Color.muted).lineLimit(1).minimumScaleFactor(0.8)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(16)
-            .frame(maxHeight: .infinity)
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.line, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 

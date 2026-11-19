@@ -23,7 +23,13 @@ struct SnapshotSafeScroll<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         if snapshotting {
-            content.frame(maxWidth: .infinity, maxHeight: axis == .vertical ? .infinity : nil, alignment: .topLeading).clipped()
+            if axis == .horizontal {
+                content.hidden().frame(maxWidth: .infinity)
+                    .overlay(alignment: .leading) { content.fixedSize(horizontal: true, vertical: false) }
+                    .clipped()
+            } else {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).clipped()
+            }
         } else {
             ScrollView(axis) { content }.scrollIndicators(.never)
         }

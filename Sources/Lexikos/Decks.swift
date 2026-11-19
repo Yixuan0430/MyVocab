@@ -8,6 +8,7 @@ struct Deck: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
     var cards: [Card]
+    var language: String?
 
     var glyph: String { name.first(where: \.isLetter).map { String($0).uppercased() } ?? "#" }
 }
@@ -49,28 +50,31 @@ enum ImportError: Error { case anki21b, empty, unreadable }
         decks = loaded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    func importFile(_ url: URL) throws {
+    func importFile(_ url: URL, nameOverride: String? = nil, language: String? = nil) throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let cards = url.pathExtension.lowercased() == "apkg" ? try Importer.anki(url) : try Importer.text(url)
         guard !cards.isEmpty else { throw ImportError.empty }
-        let deck = Deck(name: url.deletingPathExtension().lastPathComponent, cards: cards)
+        let name = nameOverride ?? url.deletingPathExtension().lastPathComponent
+        let deck = Deck(name: name, cards: cards, language: language)
         try JSONEncoder().encode(deck).write(to: file(deck), options: .atomic)
         decks.append(deck)
         sortDecks()
         onSave?(deck)
     }
 
-    @MainActor func loadFile(_ url: URL, replacing id: UUID? = nil) async throws {
+    @MainActor func loadFile(_ url: URL, replacing id: UUID? = nil, nameOverride: String? = nil, language: String? = nil) async throws {
         let existing = id.flatMap { deck($0) }
         if id != nil && existing == nil { throw ImportError.unreadable }
         let directory = dir
+        let resolvedName = existing?.name ?? nameOverride ?? url.deletingPathExtension().lastPathComponent
+        let resolvedLanguage = language ?? existing?.language
         let saved = try await Task.detached(priority: .userInitiated) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let cards = url.pathExtension.lowercased() == "apkg" ? try Importer.anki(url) : try Importer.text(url)
             guard !cards.isEmpty else { throw ImportError.empty }
-            let result = Deck(id: existing?.id ?? UUID(), name: existing?.name ?? url.deletingPathExtension().lastPathComponent, cards: cards)
+            let result = Deck(id: existing?.id ?? UUID(), name: resolvedName, cards: cards, language: resolvedLanguage)
             try JSONEncoder().encode(result).write(to: directory.appendingPathComponent("\(result.id.uuidString).json"), options: .atomic)
             return result
         }.value
@@ -104,8 +108,12 @@ enum ImportError: Error { case anki21b, empty, unreadable }
     @discardableResult func upsert(_ deck: Deck) -> Bool {
         guard !deletedIDs.contains(deck.id) else { return true }
         do {
-            try JSONEncoder().encode(deck).write(to: file(deck), options: .atomic)
-            if let i = decks.firstIndex(where: { $0.id == deck.id }) { decks[i] = deck } else { decks.append(deck) }
+            var merged = deck
+            if merged.language == nil, let existing = self.deck(deck.id) {
+                merged.language = existing.language
+            }
+            try JSONEncoder().encode(merged).write(to: file(merged), options: .atomic)
+            if let i = decks.firstIndex(where: { $0.id == merged.id }) { decks[i] = merged } else { decks.append(merged) }
             sortDecks()
             lastError = nil
             return true
@@ -131,12 +139,31 @@ enum ImportError: Error { case anki21b, empty, unreadable }
     private func file(_ deck: Deck) -> URL { dir.appendingPathComponent("\(deck.id.uuidString).json") }
 }
 
+private let sqliteUnicaseCompare: @convention(c) (
+    UnsafeMutableRawPointer?, Int32, UnsafeRawPointer?, Int32, UnsafeRawPointer?
+) -> Int32 = { _, lhsLen, lhsPtr, rhsLen, rhsPtr in
+    let lhs = lhsPtr.flatMap { ptr in
+        String(bytes: UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: UInt8.self), count: Int(lhsLen)), encoding: .utf8)
+    } ?? ""
+    let rhs = rhsPtr.flatMap { ptr in
+        String(bytes: UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: UInt8.self), count: Int(rhsLen)), encoding: .utf8)
+    } ?? ""
+    switch lhs.caseInsensitiveCompare(rhs) {
+    case .orderedAscending:
+        return -1
+    case .orderedSame:
+        return 0
+    case .orderedDescending:
+        return 1
+    }
+}
+
 enum Importer {
     static func anki(_ url: URL) throws -> [Card] {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: tmp) }
         let archive = try Archive(url: url, accessMode: .read)
-        for name in ["collection.anki21", "collection.anki2", "collection.anki21b"] {
+        for name in ["collection.anki21b", "collection.anki21", "collection.anki2"] {
             if let entry = archive[name] {
                 guard entry.uncompressedSize <= 256 * 1024 * 1024 else { throw ImportError.unreadable }
                 _ = try archive.extract(entry, to: tmp.appendingPathComponent(name))
@@ -144,16 +171,25 @@ enum Importer {
         }
 
         let fm = FileManager.default
-        let legacy = ["collection.anki21", "collection.anki2"].map { tmp.appendingPathComponent($0) }
-            .first { fm.fileExists(atPath: $0.path) }
-        guard let db = legacy else {
-            throw fm.fileExists(atPath: tmp.appendingPathComponent("collection.anki21b").path) ? ImportError.anki21b : ImportError.unreadable
+        let db: URL
+        let anki21b = tmp.appendingPathComponent("collection.anki21b")
+        if fm.fileExists(atPath: anki21b.path) {
+            let unpacked = tmp.appendingPathComponent("collection.anki21b.sqlite")
+            try ZstdDecompress.decompress(anki21b, to: unpacked)
+            db = unpacked
+        } else if let legacy = ["collection.anki21", "collection.anki2"]
+            .map({ tmp.appendingPathComponent($0) })
+            .first(where: { fm.fileExists(atPath: $0.path) }) {
+            db = legacy
+        } else {
+            throw ImportError.unreadable
         }
+
         var handle: OpaquePointer?
         defer { if let handle { sqlite3_close(handle) } }
         guard sqlite3_open_v2(db.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { throw ImportError.unreadable }
-        if let typed = AnkiImport.cards(db: handle), !typed.isEmpty,
-           typed.count > 1 || !fm.fileExists(atPath: tmp.appendingPathComponent("collection.anki21b").path) { return typed }
+        sqlite3_create_collation_v2(handle, "unicase", SQLITE_UTF8, nil, sqliteUnicaseCompare, nil)
+        if let typed = AnkiImport.cards(db: handle), !typed.isEmpty { return typed }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, "SELECT flds FROM notes ORDER BY id", -1, &stmt, nil) == SQLITE_OK else { throw ImportError.unreadable }
         defer { sqlite3_finalize(stmt) }
@@ -162,7 +198,6 @@ enum Importer {
             guard let c = sqlite3_column_text(stmt, 0) else { continue }
             rows.append(String(cString: c).components(separatedBy: "\u{1F}"))
         }
-        if rows.count <= 1, fm.fileExists(atPath: tmp.appendingPathComponent("collection.anki21b").path) { throw ImportError.anki21b }
         return cards(rows)
     }
 

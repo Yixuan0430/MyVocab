@@ -389,8 +389,10 @@ struct L {
         "imported": ["zh": "已导入", "en": "Imported", "fr": "Importés"],
         "numbers.name": ["zh": "法语数字", "en": "French numbers", "fr": "Les nombres"],
         "numbers.desc": ["zh": "0 – 9999，四档随机", "en": "0 – 9999 in four levels", "fr": "0 – 9999, quatre niveaux"],
-        "import": ["zh": "导入词库", "en": "Import deck", "fr": "Importer"],
+        "import": ["zh": "导入本地词库", "en": "Import local deck", "fr": "Importer un fichier"],
         "import.desc": ["zh": "Anki .apkg · CSV · TXT", "en": "Anki .apkg · CSV · TXT", "fr": "Anki .apkg · CSV · TXT"],
+        "catalog": ["zh": "浏览 AnkiWeb 词库", "en": "Browse AnkiWeb", "fr": "Catalogue AnkiWeb"],
+        "catalog.desc": ["zh": "多语言等级筛选 · 粘贴链接直导", "en": "By language & level · paste link", "fr": "Par langue et niveau · lien direct"],
         "import.failed": ["zh": "导入失败", "en": "Import failed", "fr": "Échec de l’importation"],
         "err.anki21b": [
             "zh": "这是新版 Anki 格式。请在 Anki 导出时勾选「支持旧版 Anki」后再导入。",

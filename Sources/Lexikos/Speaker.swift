@@ -69,6 +69,28 @@ import Observation
         return r.dominantLanguage?.rawValue ?? "fr"
     }
 
+    static func resolveSpeech(front: String, answer: String, deckLanguage: String?) -> (text: String, language: String) {
+        let target = deckLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if target.isEmpty || target.lowercased().hasPrefix("fr") {
+            let text = CardParts.lang(front) != .english ? front
+                : CardParts.lang(answer) == .french ? answer : front
+            return (text, target.isEmpty ? "fr-FR" : target)
+        }
+        let base = target.split(separator: "-").first.map { String($0).lowercased() } ?? target.lowercased()
+        let frontLang = detectLanguageCode(front)
+        let answerLang = detectLanguageCode(answer)
+        if frontLang == base { return (front, target) }
+        if answerLang == base { return (answer, target) }
+        return (front, target)
+    }
+
+    private static func detectLanguageCode(_ text: String) -> String? {
+        let r = NLLanguageRecognizer()
+        r.processString(text)
+        guard let raw = r.dominantLanguage?.rawValue else { return nil }
+        return raw.split(separator: "-").first.map { String($0).lowercased() } ?? raw.lowercased()
+    }
+
     private static func voice(for language: String) -> AVSpeechSynthesisVoice? {
         if let exact = AVSpeechSynthesisVoice(language: language) { return exact }
         if let base = language.split(separator: "-").first,

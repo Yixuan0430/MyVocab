@@ -37,6 +37,7 @@ import SwiftUI
                         ]
                     }
                     pages.append(("numbers", AnyView(PracticeView(source: .numbers, route: .constant(nil), preset: .init(index: 1987, revealed: true))), false))
+                    pages.append(("catalog", AnyView(AnkiCatalogView(route: .constant(nil), preset: catalogPreset)), false))
                     if size.width == 820 { pages.append(("settings", AnyView(SettingsView().environment(store).environment(progress)), true)) }
 
                     for (name, page, long) in pages {
@@ -51,6 +52,62 @@ import SwiftUI
             }
         }
         theme.accent = savedAccent
+    }
+
+    private static var catalogPreset: AnkiCatalogView.Preset {
+        let now = Date(timeIntervalSince1970: 1_720_000_000)
+        let decks = [
+            AnkiWebDeckSummary(
+                id: 629972372,
+                title: "French 500 coloured words with pictures and audio",
+                thumbsUp: 101,
+                thumbsDown: 1,
+                modified: now,
+                notes: 491,
+                audio: 480,
+                images: 487
+            ),
+            AnkiWebDeckSummary(
+                id: 397151029,
+                title: "Essential French A1",
+                thumbsUp: 78,
+                thumbsDown: 2,
+                modified: now.addingTimeInterval(-86400 * 30),
+                notes: 604,
+                audio: 614,
+                images: 622
+            ),
+            AnkiWebDeckSummary(
+                id: 212040160,
+                title: "The Ultimate French Deck: LoF & French in Action",
+                thumbsUp: 65,
+                thumbsDown: 0,
+                modified: now.addingTimeInterval(-86400 * 14),
+                notes: 300,
+                audio: 266,
+                images: 224
+            )
+        ]
+        let detail = AnkiWebDeckDetail(
+            id: 629972372,
+            title: "French 500 coloured words with pictures and audio",
+            tags: "french a1 audio pictures beginner",
+            sizeBytes: 18_420_000,
+            lastUpdated: now,
+            description: "500 essential beginner French words organised for A1 learners with gender colour coding, native audio, and visual cues.",
+            notes: 491,
+            audio: 480,
+            images: 487,
+            thumbsUp: 101,
+            thumbsDown: 1,
+            originalDeckName: "French 500",
+            sampleNotes: [
+                .init(fields: [.init(name: "French", value: "le pain"), .init(name: "English", value: "bread")]),
+                .init(fields: [.init(name: "French", value: "la maison"), .init(name: "English", value: "house")])
+            ],
+            downloadKey: ""
+        )
+        return .init(language: .french, level: .a1, decks: decks, detail: detail)
     }
 
     private static func render(_ page: AnyView, size: CGSize, dark: Bool, store: DeckStore, progress: ProgressStore, to url: URL) {

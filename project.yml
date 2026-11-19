@@ -7,8 +7,8 @@ settings:
   base:
     DEVELOPMENT_TEAM: BGM8P5U985
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: 1.1.0
-    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.2.0
+    CURRENT_PROJECT_VERSION: 2
     SWIFT_VERSION: 5.0
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: MyVocab
@@ -16,6 +16,7 @@ settings:
     SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CLOUDKIT"
 packages:
   ZIPFoundation: { url: https://github.com/weichsel/ZIPFoundation.git, exactVersion: 0.9.20 }
+  zstd: { url: https://github.com/facebook/zstd.git, exactVersion: 1.5.7 }
 targets:
   Lexikos-macOS:
     type: application
@@ -27,7 +28,10 @@ targets:
         buildPhase: resources
       - path: scripts/myvocab-mcp.py
         buildPhase: resources
-    dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-macOS }]
+    dependencies:
+      - { package: ZIPFoundation }
+      - { package: zstd, product: libzstd }
+      - { target: LexikosWidgets-macOS }
     info:
       path: Config/Lexikos-macOS-Info.plist
       properties:
@@ -55,7 +59,10 @@ targets:
       - path: Sources/Lexikos
         excludes: ["macOS/**"]
       - Resources/Assets.xcassets
-    dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-iOS }]
+    dependencies:
+      - { package: ZIPFoundation }
+      - { package: zstd, product: libzstd }
+      - { target: LexikosWidgets-iOS }
     settings:
       base:
         PRODUCT_NAME: MyVocab

@@ -13,7 +13,7 @@ while IFS= read -r -d '' f; do
     CODE_FILES+=("$f")
 done < <(find Sources Tests scripts -type f \( -name '*.swift' -o -name '*.py' -o -name '*.sh' \) -print0)
 
-for f in bundle.sh release.sh release-ios.sh; do
+for f in Package.swift bundle.sh release.sh release-ios.sh; do
     if [ -f "$f" ]; then
         CODE_FILES+=("$f")
     fi

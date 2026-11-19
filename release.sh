@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-VERSION=1.1.0
+VERSION=1.2.0
 PROFILE="${NOTARY_PROFILE:-lexikos-notary}"
 NOTARIZE=1
 if [ "${1:-}" = "--export-only" ]; then
