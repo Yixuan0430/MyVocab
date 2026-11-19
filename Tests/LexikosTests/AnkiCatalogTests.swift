@@ -43,9 +43,10 @@ final class AnkiCatalogTests: XCTestCase {
     }
 
     func testDecodeItemInfoParsesDetailSamplesAndErrors() throws {
-        let pair1 = pbStringField(1, "French") + pbStringField(2, "bonjour [sound:a.mp3]")
-        let pair2 = pbStringField(1, "English") + pbStringField(2, "<b>hello</b>")
-        let note = pbBytesField(1, pair1) + pbBytesField(1, pair2)
+        let pair1 = pbStringField(1, "Front") + pbStringField(2, "[image:1.jpg]")
+        let pair2 = pbStringField(1, "French") + pbStringField(2, "bonjour [sound:0.mp3]")
+        let pair3 = pbStringField(1, "English") + pbStringField(2, "<b>hello</b>")
+        let note = pbBytesField(1, pair1) + pbBytesField(1, pair2) + pbBytesField(1, pair3)
 
         let deckMsg = pbVarintField(1, 500)
             + pbVarintField(2, 480)
@@ -77,8 +78,16 @@ final class AnkiCatalogTests: XCTestCase {
         XCTAssertEqual(detail.originalDeckName, "Essential::French")
         XCTAssertEqual(detail.downloadKey, "tok_abc123")
         XCTAssertEqual(detail.sampleNotes.count, 1)
-        XCTAssertEqual(detail.sampleNotes[0].fields.map(\.name), ["French", "English"])
-        XCTAssertEqual(detail.sampleNotes[0].fields.map(\.value), ["bonjour", "hello"])
+        XCTAssertEqual(detail.sampleNotes[0].fields.map(\.name), ["Front", "French", "English"])
+        XCTAssertEqual(detail.sampleNotes[0].fields.map(\.value), ["", "bonjour", "hello"])
+        XCTAssertEqual(detail.sampleNotes[0].fields[0].images, ["1.jpg"])
+        XCTAssertEqual(detail.sampleNotes[0].fields[1].sounds, ["0.mp3"])
+        XCTAssertEqual(
+            detail.mediaPreviewURL(for: "1.jpg")?.absoluteString,
+            "https://ankiweb.net/shared/mpreview/1089240419/1.jpg?1710000000"
+        )
+        XCTAssertNil(detail.mediaPreviewURL(for: "../secret.jpg"))
+        XCTAssertNil(detail.mediaPreviewURL(for: "a/b.jpg"))
 
         XCTAssertThrowsError(try AnkiWebClient.decodeItemInfo(pbVarintField(2, 1), sharedID: 1)) { err in
             XCTAssertEqual(err as? AnkiWebError, .notFound)

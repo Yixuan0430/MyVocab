@@ -392,6 +392,9 @@ struct CatalogL {
         "meta.none": ["zh": "无", "en": "None", "fr": "Aucun"],
         "detail.description": ["zh": "词库简介", "en": "Description", "fr": "Description"],
         "detail.samples": ["zh": "示例卡片", "en": "Sample cards", "fr": "Exemples de cartes"],
+        "sample.play": ["zh": "试听原音", "en": "Play audio", "fr": "Écouter"],
+        "sample.stop": ["zh": "停止播放", "en": "Stop", "fr": "Arrêter"],
+        "sample.audioOther": ["zh": "原库音频", "en": "Deck audio", "fr": "Audio"],
         "detail.note": [
             "zh": "说明：原库媒体数量供选词库参考；MyVocab 会提取文本卡片并用系统语音朗读，以保持轻量与 iCloud 快速同步。",
             "en": "Note: Media counts reflect the AnkiWeb package. MyVocab imports card text and uses system TTS for lightweight iCloud sync.",

@@ -22,6 +22,7 @@ struct AnkiCatalogDetailPanel: View {
     let onDownload: (AnkiWebDeckDetail) -> Void
     let onCancelDownload: () -> Void
     let onOpenDeck: (Deck) -> Void
+    @State private var audioPlayer = SampleAudioPlayer()
 
     var body: some View {
         Group {
@@ -38,6 +39,8 @@ struct AnkiCatalogDetailPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: detail?.id) { audioPlayer.stop() }
+        .onDisappear { audioPlayer.stop() }
     }
 
     private var emptyState: some View {
@@ -113,7 +116,7 @@ struct AnkiCatalogDetailPanel: View {
                 metaGrid(detail)
                 actionSection(detail)
                 if !detail.sampleNotes.isEmpty {
-                    samplesSection(detail.sampleNotes)
+                    samplesSection(detail)
                 }
                 if !detail.description.isEmpty {
                     descriptionSection(detail.description)
@@ -303,31 +306,103 @@ struct AnkiCatalogDetailPanel: View {
         }
     }
 
-    private func samplesSection(_ notes: [AnkiWebSampleNote]) -> some View {
+    private func samplesSection(_ detail: AnkiWebDeckDetail) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionLabel(text: l["detail.samples"])
-            ForEach(Array(notes.prefix(4).enumerated()), id: \.offset) { _, note in
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(note.fields.prefix(4).enumerated()), id: \.offset) { idx, field in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            ForEach(Array(detail.sampleNotes.prefix(4).enumerated()), id: \.offset) { _, note in
+                let fields = orderedSampleFields(note.fields)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(fields.prefix(6).enumerated()), id: \.offset) { idx, field in
+                        HStack(alignment: .top, spacing: 8) {
                             if !field.name.isEmpty {
                                 Text(field.name)
-                                    .font(.system(size: 10.5, weight: .semibold))
-                                    .foregroundStyle(Color.muted)
-                                    .frame(width: 72, alignment: .leading)
-                                    .lineLimit(1)
+                                    .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Color.muted)
+                                    .frame(width: 72, alignment: .leading).lineLimit(2)
+                                    .padding(.top, 2)
                             }
-                            Text(field.value)
-                                .font(.system(size: idx == 0 ? 13.5 : 12.5, weight: idx == 0 ? .medium : .regular))
-                                .foregroundStyle(idx == 0 ? Color.ink : Color.muted)
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 6) {
+                                if !field.value.isEmpty {
+                                    Text(field.value)
+                                        .font(.system(size: idx == 0 ? 13.5 : 12.5, weight: idx == 0 ? .medium : .regular))
+                                        .foregroundStyle(idx == 0 ? Color.ink : Color.muted)
+                                        .lineLimit(3)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                if !field.images.isEmpty {
+                                    HStack(spacing: 6) {
+                                        ForEach(field.images.prefix(3), id: \.self) { img in
+                                            sampleImage(detail.mediaPreviewURL(for: img))
+                                        }
+                                    }
+                                }
+                                if !field.sounds.isEmpty {
+                                    HStack(spacing: 6) {
+                                        ForEach(field.sounds.prefix(2), id: \.self) { snd in
+                                            sampleAudioButton(filename: snd, url: detail.mediaPreviewURL(for: snd))
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
                 .padding(11)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.well))
             }
+        }
+    }
+
+    private func orderedSampleFields(_ fields: [AnkiWebSampleNote.Field]) -> [AnkiWebSampleNote.Field] {
+        let lowPriority: Set<String> = ["tags", "id", "frequency index", "wiktionary entry"]
+        let primary = fields.filter { !lowPriority.contains($0.name.lowercased()) }
+        let secondary = fields.filter { lowPriority.contains($0.name.lowercased()) }
+        return primary.isEmpty ? secondary : primary + secondary
+    }
+
+    @ViewBuilder private func sampleImage(_ url: URL?) -> some View {
+        if let url {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFit()
+                        .frame(maxWidth: 132, maxHeight: 82)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.lineSoft))
+                case .failure:
+                    Image(systemName: "photo").font(.system(size: 13)).foregroundStyle(Color.faint)
+                        .frame(width: 56, height: 42)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.panel))
+                default:
+                    ProgressView().controlSize(.small)
+                        .frame(width: 56, height: 42)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.panel))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func sampleAudioButton(filename: String, url: URL?) -> some View {
+        if let url, filename.lowercased().hasSuffix(".mp3") {
+            let playing = audioPlayer.playingURL == url
+            Button { audioPlayer.toggle(url) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: playing ? "stop.fill" : "speaker.wave.2.fill").font(.system(size: 10.5, weight: .semibold))
+                    Text(playing ? l["sample.stop"] : l["sample.play"]).font(.system(size: 11, weight: .medium))
+                }
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .foregroundStyle(playing ? accent.onFill : accent.color)
+                .background(Capsule().fill(playing ? accent.fill : accent.soft))
+            }
+            .buttonStyle(.plain)
+        } else {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform").font(.system(size: 10))
+                Text(l["sample.audioOther"]).font(.system(size: 11))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .foregroundStyle(Color.muted)
+            .background(Capsule().fill(Color.panel))
         }
     }
 

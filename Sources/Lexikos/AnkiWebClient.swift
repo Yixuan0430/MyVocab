@@ -15,7 +15,19 @@ struct AnkiWebDeckSummary: Identifiable, Hashable, Codable, Sendable {
 }
 
 struct AnkiWebSampleNote: Hashable, Codable, Sendable {
-    struct Field: Hashable, Codable, Sendable { let name: String; let value: String }
+    struct Field: Hashable, Codable, Sendable {
+        let name: String
+        let value: String
+        let images: [String]
+        let sounds: [String]
+
+        init(name: String, value: String, images: [String] = [], sounds: [String] = []) {
+            self.name = name
+            self.value = value
+            self.images = images
+            self.sounds = sounds
+        }
+    }
     let fields: [Field]
 }
 
@@ -34,6 +46,16 @@ struct AnkiWebDeckDetail: Identifiable, Hashable, Codable, Sendable {
     var pageURL: URL { URL(string: "https://ankiweb.net/shared/info/\(id)")! }
     var hasAudio: Bool { audio > 0 }
     var hasImages: Bool { images > 0 }
+
+    func mediaPreviewURL(for filename: String) -> URL? {
+        let trimmed = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("/"), !trimmed.contains("\\"), !trimmed.contains("..") else {
+            return nil
+        }
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        let stamp = Int64(lastUpdated.timeIntervalSince1970)
+        return URL(string: "https://ankiweb.net/shared/mpreview/\(id)/\(encoded)?\(stamp)")
+    }
 }
 
 enum AnkiWebError: Error, Equatable {
@@ -437,16 +459,32 @@ final class AnkiWebClient: @unchecked Sendable {
         var out: [AnkiWebSampleNote.Field] = []
         for field in try ProtoWire.fields(in: data) where field.number == 1 {
             guard case .bytes(let pairBytes) = field.value else { continue }
-            var name = "", value = ""
+            var name = "", raw = ""
             for pf in try ProtoWire.fields(in: pairBytes) {
                 switch (pf.number, pf.value) {
                 case (1, .bytes(let b)): name = String(data: b, encoding: .utf8) ?? ""
-                case (2, .bytes(let b)): value = Importer.clean(String(data: b, encoding: .utf8) ?? "")
+                case (2, .bytes(let b)): raw = String(data: b, encoding: .utf8) ?? ""
                 default: break
                 }
             }
-            if !value.isEmpty { out.append(.init(name: name, value: value)) }
+            let images = extractTags(in: raw, prefix: "image")
+            let sounds = extractTags(in: raw, prefix: "sound")
+            let stripped = raw.replacingOccurrences(of: #"\[(image|sound):[^\]]+\]"#, with: "", options: .regularExpression)
+            let value = Importer.clean(stripped)
+            if !value.isEmpty || !images.isEmpty || !sounds.isEmpty {
+                out.append(.init(name: name, value: value, images: images, sounds: sounds))
+            }
         }
         return out.isEmpty ? nil : AnkiWebSampleNote(fields: out)
+    }
+
+    private static func extractTags(in text: String, prefix: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"\["# + prefix + #":([^\]]+)\]"#) else { return [] }
+        let ns = text as NSString
+        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+            guard match.numberOfRanges > 1 else { return nil }
+            let val = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return val.isEmpty ? nil : val
+        }
     }
 }

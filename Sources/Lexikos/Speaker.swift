@@ -118,3 +118,45 @@ import Observation
         catch { lastError = error.localizedDescription; return nil }
     }
 }
+
+@MainActor @Observable final class SampleAudioPlayer {
+    private(set) var playingURL: URL?
+    private var player: AVPlayer?
+    @ObservationIgnored private nonisolated(unsafe) var endObserver: NSObjectProtocol?
+
+    deinit {
+        if let observer = endObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    func toggle(_ url: URL) {
+        if playingURL == url {
+            stop()
+            return
+        }
+        stop()
+        let item = AVPlayerItem(url: url)
+        let p = AVPlayer(playerItem: item)
+        player = p
+        playingURL = url
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                if self?.playingURL == url { self?.stop() }
+            }
+        }
+        p.play()
+    }
+
+    func stop() {
+        if let observer = endObserver {
+            NotificationCenter.default.removeObserver(observer)
+            endObserver = nil
+        }
+        player?.pause()
+        player = nil
+        playingURL = nil
+    }
+}
