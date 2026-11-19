@@ -39,24 +39,38 @@ enum AnkiImport {
 
     private static func card(_ v: [String], _ t: NoteType, _ m: FieldMap) -> Card? {
         func val(_ i: Int) -> String? { i < v.count && usable(v[i]) ? v[i] : nil }
-        var front = m.front.compactMap(val).joined(separator: " ")
-        if front.isEmpty { front = v.first(where: usable) ?? "" }
+        var frontIndices: [Int] = m.front.filter { val($0) != nil }
+        if frontIndices.isEmpty, let fallback = v.indices.first(where: { val($0) != nil }) {
+            frontIndices = [fallback]
+        }
+        var front = frontIndices.compactMap(val).joined(separator: " ")
         guard !front.isEmpty else { return nil }
-        if let tag = m.tag.flatMap(val) { front += " (\(tag))" }
+        let usedFront = Set(frontIndices)
+        if let tagIdx = m.tag, !usedFront.contains(tagIdx), let tag = val(tagIdx) { front += " (\(tag))" }
 
-        var lines: [String] = []
-        let answer = m.answer.compactMap(val)
-        lines.append(answer.first ?? "")
-        lines += answer.dropFirst()
+        var answer = m.answer.filter { !usedFront.contains($0) }.compactMap(val)
+        var extras = m.extras.filter { !usedFront.contains($0) && val($0) != nil }
+        if answer.isEmpty, let firstExtra = extras.first, let text = val(firstExtra) {
+            answer = [text]
+            extras.removeFirst()
+        }
+        var lines = answer
         let examples = m.examples.compactMap { ex -> String? in
-            guard let fr = val(ex.fr) else { return nil }
-            return ex.en.flatMap(val).map { "\(fr) (\($0))" } ?? fr
+            guard !usedFront.contains(ex.fr), let fr = val(ex.fr) else { return nil }
+            let en = ex.en.flatMap { usedFront.contains($0) ? nil : val($0) }
+            return en.map { "\(fr) (\($0))" } ?? fr
         }
         if !examples.isEmpty { lines.append("Example:"); lines += examples }
-        for i in m.extras { if let x = val(i) { lines.append("\(t.fields[i]):"); lines.append(x) } }
-        if lines[0].isEmpty { lines.removeFirst() }
+        for i in extras {
+            if let x = val(i) {
+                let heading = t.fields[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                if heading.contains(where: \.isLetter) { lines.append("\(heading):") }
+                lines.append(x)
+            }
+        }
         guard !lines.isEmpty else { return nil }
-        return Card(front: front, back: lines.joined(separator: "\n"), hint: m.hint.flatMap(val) ?? "")
+        let hint = m.hint.flatMap { usedFront.contains($0) ? nil : val($0) } ?? ""
+        return Card(front: front, back: lines.joined(separator: "\n"), hint: hint)
     }
 
     private static func has(_ name: String, _ words: [String]) -> Bool { words.contains { name.contains($0) } }
@@ -71,10 +85,14 @@ enum AnkiImport {
 
     static func fieldMap(_ t: NoteType) -> FieldMap {
         let names = t.fields.map { $0.lowercased().trimmingCharacters(in: .whitespaces) }
+        let builtIns: Set<String> = ["frontside", "tags", "type", "deck", "subdeck", "card", "cardflag"]
         func refs(_ tmpl: String) -> [Int] {
             tmpl.matches(of: #/\{\{([^}]+)\}\}/#).compactMap { m in
-                let raw = String(m.1).split(separator: ":").last.map(String.init) ?? ""
-                let name = raw.trimmingCharacters(in: CharacterSet(charactersIn: "#/^ ")).lowercased()
+                let token = String(m.1).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let first = token.first, !"#/^!".contains(first) else { return nil }
+                let raw = token.split(separator: ":").last.map(String.init) ?? token
+                let name = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !builtIns.contains(name) else { return nil }
                 return names.firstIndex(of: name)
             }
         }

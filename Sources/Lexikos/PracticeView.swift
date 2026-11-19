@@ -269,8 +269,10 @@ struct PracticeView: View {
             }
 
             VStack(spacing: 10) {
+                let multiLineTable = parts.answer.contains("\n") && parts.answer.contains(" · ")
                 Text(parts.answer)
-                    .font(.system(size: (isNumbers ? 34 : 28) * k, design: .serif))
+                    .font(.system(size: (isNumbers ? 34 : multiLineTable ? 19 : 28) * k, design: .serif))
+                    .lineSpacing(multiLineTable ? 5 : 2)
                     .foregroundStyle(Color.ink.opacity(0.92))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 640 * k)

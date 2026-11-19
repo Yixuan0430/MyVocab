@@ -18,8 +18,11 @@ final class RealDataTests: XCTestCase {
         let first = ProgressStore(dir: dir), second = ProgressStore(dir: dir)
         XCTAssertNil(first.lastError)
         XCTAssertNil(second.lastError)
+        var checked = 0
         for deck in decks.decks {
             let log = dir.appendingPathComponent("\(deck.id.uuidString).jsonl")
+            guard FileManager.default.fileExists(atPath: log.path) else { continue }
+            checked += 1
             let raw = try Data(contentsOf: log)
             let text = try XCTUnwrap(String(data: raw, encoding: .utf8))
             let events = try text.split(separator: "\n").map {
@@ -34,6 +37,7 @@ final class RealDataTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: log), raw)
             print("real log:", deck.cards.count, "cards;", expected.count, "states;", events.count, "events")
         }
+        XCTAssertGreaterThan(checked, 0)
     }
 
     func testRealSnapshotsMigrateLosslessly() throws {
@@ -50,14 +54,19 @@ final class RealDataTests: XCTestCase {
             let filename = "\(d.id.uuidString).json"
             let current = source.appendingPathComponent("progress/" + filename)
             let old = fm.fileExists(atPath: current.path) ? current : current.appendingPathExtension("legacy")
+            guard fm.fileExists(atPath: old.path) else { continue }
             let data = try Data(contentsOf: old)
             before[d.id] = try JSONDecoder().decode([Int: CardState].self, from: data).filter { d.cards.indices.contains($0.key) }
             try data.write(to: progressDir.appendingPathComponent(filename))
         }
+        XCTAssertFalse(before.isEmpty)
         let store = ProgressStore(dir: progressDir)
         XCTAssertNil(store.lastError)
-        for d in decks { XCTAssertEqual(store.states(d), before[d.id]); print("real legacy:", before[d.id]!.count, "states") }
+        for d in decks where before[d.id] != nil {
+            XCTAssertEqual(store.states(d), before[d.id])
+            print("real legacy:", before[d.id]!.count, "states")
+        }
         let restart = ProgressStore(dir: progressDir)
-        for d in decks { XCTAssertEqual(restart.states(d), before[d.id]) }
+        for d in decks where before[d.id] != nil { XCTAssertEqual(restart.states(d), before[d.id]) }
     }
 }

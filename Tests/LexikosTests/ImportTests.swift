@@ -8,6 +8,76 @@ final class ImportTests: XCTestCase {
         XCTAssertEqual(Importer.clean("un<br>deux&nbsp;[sound:x.mp3]"), "un\ndeux")
     }
 
+    func testCleanFormatsHTMLTablesEntitiesStylesAndCloze() {
+        let html = """
+        <style>.tbl { color: red; }</style>
+        <table>
+          <tr><td>je</td><td>tu</td><td>il, elle</td></tr>
+          <tr><td>fus</td><td>fus</td><td>fut</td></tr>
+          <tr><td>/fy/</td><td>/fy/</td><td>/fy/</td></tr>
+          <tr><td>nous</td><td>vous</td><td>ils, elles</td></tr>
+          <tr><td>fûmes</td><td>fûtes</td><td>furent</td></tr>
+          <tr><td>/fym/</td><td>/fyt/</td><td>/fyʁ/</td></tr>
+        </table>
+        <p>{{c1::L&#39;homme::the man}} &mdash; ok</p>
+        """
+        let cleaned = Importer.clean(html)
+        let lines = cleaned.split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines[0], "je · tu · il, elle")
+        XCTAssertEqual(lines[1], "fus · fus · fut")
+        XCTAssertEqual(lines[2], "/fy/ · /fy/ · /fy/")
+        XCTAssertEqual(lines[3], "nous · vous · ils, elles")
+        XCTAssertEqual(lines[4], "fûmes · fûtes · furent")
+        XCTAssertEqual(lines[5], "/fym/ · /fyt/ · /fyʁ/")
+        XCTAssertEqual(lines[6], "L'homme — ok")
+
+        let card = Card(front: "ÊTRE [Indicative Past Historic]", back: lines.prefix(6).joined(separator: "\n"))
+        let parts = CardParts(card)
+        XCTAssertEqual(parts.answer.split(separator: "\n").count, 6)
+        XCTAssertTrue(parts.answer.contains("fus · fus · fut"))
+        XCTAssertTrue(parts.answer.contains("fûmes · fûtes · furent"))
+    }
+
+    func testAudioOnlyFrontFallbackDoesNotDuplicateAnswerOrShowNumericHeader() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("collection.anki2")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let models = """
+        {"1":{"flds":[{"ord":0,"name":"Back"},{"ord":1,"name":"3"},{"ord":2,"name":"Front"}],\
+        "tmpls":[{"qfmt":"{{#Front}}{{Front}}{{/Front}}","afmt":"{{FrontSide}}<hr>{{Back}}<br>{{3}}"}]}}
+        """
+        let sql = """
+        CREATE TABLE col (models TEXT);
+        CREATE TABLE notes (id INTEGER, mid INTEGER, flds TEXT);
+        INSERT INTO col VALUES ('\(models)');
+        INSERT INTO notes VALUES (1, 1, 'Travaillons !\u{1f}Let&#39;s work!\u{1f}[sound:0.mp3]');
+        """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+        let file = root.appendingPathComponent("audio-front.apkg")
+        let archive = try Archive(url: file, accessMode: .create)
+        try archive.addEntry(with: "collection.anki2", relativeTo: root)
+        let cards = try Importer.anki(file)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards[0].front, "Travaillons !")
+        XCTAssertEqual(cards[0].back, "Let's work!")
+    }
+
+    func testFieldMapIgnoresMustacheConditionalBlocks() {
+        let noteType = AnkiImport.NoteType(
+            fields: ["Word", "Meaning", "Audio", "Notes"],
+            qfmt: "{{#Audio}}{{Word}}{{/Audio}}{{^Notes}}{{Word}}{{/Notes}}",
+            afmt: "{{FrontSide}}<hr>{{#Notes}}{{Notes}}{{/Notes}}{{Meaning}}"
+        )
+        let map = AnkiImport.fieldMap(noteType)
+        XCTAssertEqual(map.front, [0])
+        XCTAssertEqual(map.answer, [1])
+        XCTAssertEqual(map.extras, [3])
+    }
+
     func testAnki21bZstdWithUnicaseCollationImportsCards() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

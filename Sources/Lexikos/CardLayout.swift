@@ -52,9 +52,18 @@ struct CardParts {
         func kind(_ t: String?) -> Kind? { t.map { CardParts.category($0) } ?? .meaning }
         if let i = blocks.firstIndex(where: { kind($0.0) == .meaning })
             ?? blocks.firstIndex(where: { !$0.1.isEmpty }), !blocks[i].1.isEmpty {
-            answer = blocks[i].1.removeFirst()
+            let lines = blocks[i].1
+            if blocks[i].0 == nil, lines.count >= 2, lines.filter({ $0.contains(" · ") }).count >= 2 {
+                let take = min(lines.count, 8)
+                answer = lines.prefix(take).joined(separator: "\n")
+                blocks[i].1.removeFirst(take)
+            } else {
+                answer = blocks[i].1.removeFirst()
+            }
         }
-        if case let (head, note?) = CardParts.splitGloss(answer), note.count > 20 { (answer, answerNote) = (head, note) }
+        if !answer.contains("\n"), case let (head, note?) = CardParts.splitGloss(answer), note.count > 20 {
+            (answer, answerNote) = (head, note)
+        }
 
         var merged: [String: Section] = [:]
         func add(_ cat: Category, _ title: String, _ item: Item) {

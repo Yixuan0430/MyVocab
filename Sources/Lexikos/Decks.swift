@@ -253,12 +253,56 @@ enum Importer {
     }
 
     static func clean(_ s: String) -> String {
-        var t = s.replacingOccurrences(of: "<br\\s*/?>|<div[^>]*>|</div>|</p>", with: "\n", options: [.regularExpression, .caseInsensitive])
-        t = t.replacingOccurrences(of: "<[^>]+>|\\[sound:[^\\]]*\\]", with: "", options: .regularExpression)
-        for (k, v) in ["&nbsp;": " ", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&amp;": "&"] {
-            t = t.replacingOccurrences(of: k, with: v)
+        var t = s.replacingOccurrences(of: "<(style|script)[^>]*>[\\s\\S]*?</\\1>", with: "", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(of: #"\{\{c\d+::([^:}]+)(?:::[^}]*)?\}\}"#, with: "$1", options: .regularExpression)
+        t = t.replacingOccurrences(of: "</t[dh]>\\s*<t[dh][^>]*>", with: " · ", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(
+            of: "<br\\s*/?>|<hr[^>]*>|<div[^>]*>|</div>|</p>|</tr>|</li>|</h[1-6]>|</dt>|</dd>|</blockquote>",
+            with: "\n",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        t = t.replacingOccurrences(of: "<[^>]+>|\\[(?:sound|image):[^\\]]*\\]", with: "", options: [.regularExpression, .caseInsensitive])
+        t = decodeHTMLEntities(t)
+        return t.split(separator: "\n")
+            .map { line in
+                line.replacingOccurrences(of: "[ \\t\\u{00A0}]+", with: " ", options: .regularExpression)
+                    .replacingOccurrences(of: "(?:\\s*·\\s*){2,}", with: " · ", options: .regularExpression)
+                    .replacingOccurrences(of: "^(?:·\\s*)+|(?:\\s*·)+$", with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static func decodeHTMLEntities(_ input: String) -> String {
+        var t = input
+        let named: [(String, String)] = [
+            ("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""),
+            ("&apos;", "'"), ("&#39;", "'"), ("&rsquo;", "’"), ("&lsquo;", "‘"),
+            ("&ldquo;", "“"), ("&rdquo;", "”"), ("&ndash;", "–"), ("&mdash;", "—"),
+            ("&hellip;", "…"), ("&amp;", "&")
+        ]
+        for (entity, replacement) in named {
+            t = t.replacingOccurrences(of: entity, with: replacement)
         }
-        return t.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }.joined(separator: "\n")
+        guard let regex = try? NSRegularExpression(pattern: #"&#(?:x([0-9A-Fa-f]+)|(\d+));"#) else { return t }
+        let ns = t as NSString
+        let matches = regex.matches(in: t, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return t }
+        let mutable = NSMutableString(string: t)
+        for match in matches.reversed() {
+            let codePoint: UInt32?
+            if match.range(at: 1).location != NSNotFound {
+                codePoint = UInt32(ns.substring(with: match.range(at: 1)), radix: 16)
+            } else if match.range(at: 2).location != NSNotFound {
+                codePoint = UInt32(ns.substring(with: match.range(at: 2)), radix: 10)
+            } else {
+                codePoint = nil
+            }
+            if let cp = codePoint, let scalar = UnicodeScalar(cp) {
+                mutable.replaceCharacters(in: match.range, with: String(scalar))
+            }
+        }
+        return mutable as String
     }
 }
